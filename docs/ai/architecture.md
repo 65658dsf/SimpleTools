@@ -1,0 +1,103 @@
+# SimpleTools Architecture
+
+## Product boundary
+
+SimpleTools is a local-only desktop application. It accepts user-selected paths, processes files
+on the same machine, and writes new files below a user-selected output directory. No account,
+telemetry, cloud storage, or processing API exists in v1. The update checker is isolated as the
+only network-enabled feature.
+
+## Components
+
+```text
+Vue 3 + shadcn-vue UI
+        |
+        | typed Wails bindings (paths, options, ids)
+        v
+internal/app
+  - request validation
+  - job registry and cancellation
+  - progress/event translation
+        |
+        +--> internal/tools/image
+        |      - PNG/JPEG stdlib codecs
+        |      - WebP and AVIF codecs
+        |      - metadata/orientation policy
+        |
+        +--> internal/tools/pdf
+        |      - go-fitz / MuPDF page rendering
+        |
+        +--> internal/platform
+               - native dialogs and paths
+               - atomic file writes
+               - signed update download/install
+```
+
+The frontend owns view state, form state, translations, theme, and the current queue display.
+Go owns filesystem access, decoding/encoding, output naming, task lifecycle, and update
+verification. The frontend does not read arbitrary local files through browser APIs.
+
+## Job flow
+
+1. The UI obtains paths from native dialogs or the Wails file-drop event.
+2. Go canonicalizes paths, recursively expands folder inputs, deduplicates files, and validates
+   the selected tool options.
+3. `StartJob` returns an opaque job id immediately. A bounded worker pool processes files and
+   emits `job:progress`, `job:item`, and terminal events.
+4. Each output is written to a random temporary file in its final directory, synced, and renamed
+   atomically. A collision suffix is selected without replacing an existing file.
+5. Cancellation propagates through `context.Context`; workers remove incomplete temporary files.
+   Successful outputs remain available when another item fails.
+
+Folder jobs mirror the input folder's relative structure below the chosen output directory.
+PDF inputs use a per-document subdirectory and one PNG per selected page.
+
+## Tool contracts
+
+### Image conversion
+
+Supported formats are PNG, JPEG, WebP, and AVIF. The output extension is derived from the target
+format (`.jpg` for JPEG). Alpha is preserved by PNG/WebP/AVIF and flattened to white for JPEG.
+
+### Image compression
+
+Compression keeps the source format. JPEG, WebP, and AVIF use a 1-100 quality value. A target byte
+size performs at most eight quality encodes and accepts a result within five percent when possible.
+PNG is lossless and can only optimize its compression level; an unattainable target is reported as
+a warning rather than silently changing format.
+
+### PDF to PNG
+
+MuPDF renders pages at 72, 150, 300, or 600 DPI (150 by default). Page expressions use inclusive
+one-based values such as `1-3,5`; empty means all pages. Rendering is page-by-page and bounded by
+the configured per-page pixel safety limit.
+
+## Public binding surface
+
+The Wails binding is the only UI/backend boundary:
+
+- `OpenInputFiles`, `OpenInputFolder`, and `ChooseOutputDirectory` return validated path metadata.
+- `OpenInputFilesFromPaths` is the path-only bridge used by native drag-and-drop; it applies the
+  same extension and folder expansion rules as the dialogs.
+- `PreviewImage` returns dimensions and a bounded thumbnail data URL only.
+- `StartJob`, `GetJob`, and `CancelJob` manage asynchronous work.
+- `OpenOutputDirectory` reveals a validated output directory through the host platform.
+- `CheckForUpdate` and `DownloadAndInstallUpdate` handle signed GitHub release assets after user
+  confirmation.
+
+Jobs emit `job:progress` and `job:item` snapshots while running, followed by `job:completed`; a
+batch with one or more failed items also emits `job:failed`. Update checks use `update:available`
+and `update:progress` without exposing file contents to the frontend.
+
+Go DTOs are the source of truth. TypeScript bindings are generated and checked for drift.
+
+## Platform and licensing boundary
+
+Wails uses WebView2 on Windows and WKWebView on macOS. Windows installers use an online WebView2
+bootstrapper. Native builds run on their target OS because MuPDF uses CGO and platform libraries.
+MuPDF and its notices are distributed under AGPL-3.0-or-later; codec and font licenses are listed
+in `THIRD_PARTY_NOTICES.md`. The bundled go-fitz static archives omit CJK fonts, so native
+`mupdf` builds install the embedded OFL-1.1 Noto Sans SC subset through MuPDF's CJK and generic
+fallback font hooks. The subset covers Simplified Chinese; documents that require Japanese,
+Korean, Traditional Chinese, or characters outside the subset still need embedded fonts or may
+show missing glyphs.

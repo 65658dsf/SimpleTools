@@ -1,0 +1,31 @@
+# Go
+/simpletools
+/build/
+/bin/
+*.test
+*.out
+
+# Wails generated/build output
+/frontend/dist/*
+!/frontend/dist/.gitkeep
+/build/bin/
+
+# Frontend dependencies and local caches
+/frontend/node_modules/
+/.npm/
+*.log
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local signing and update secrets
+.env
+.env.*
+!.env.example
+
+# Local investigation/build scratch data
+/.tmpinspect/
+*.tsbuildinfo

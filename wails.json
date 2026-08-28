@@ -1,0 +1,19 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "SimpleTools",
+  "outputfilename": "SimpleTools",
+  "frontend:dir": "frontend",
+  "frontend:install": "npm ci",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "65658dsf"
+  },
+  "info": {
+    "companyName": "LemonDev",
+    "productName": "SimpleTools",
+    "productVersion": "0.1.0",
+    "comments": "Local-first image and PDF utilities"
+  }
+}

@@ -1,0 +1,466 @@
+name: Release desktop artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver version such as 0.1.0
+        required: true
+        type: string
+      notes:
+        description: Release notes (Markdown)
+        required: false
+        default: ""
+        type: string
+      publish:
+        description: Publish a GitHub Release when every signing secret is configured
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: SimpleTools
+  APP_VERSION: ${{ inputs.version }}
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    env:
+      CGO_ENABLED: 1
+      UPDATE_PUBLIC_KEY: ${{ secrets.SIMPLETEOOLS_UPDATE_PUBLIC_KEY }}
+      WINDOWS_CERTIFICATE_BASE64: ${{ secrets.SIMPLETEOOLS_WINDOWS_CERTIFICATE_BASE64 }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.SIMPLETEOOLS_WINDOWS_CERTIFICATE_PASSWORD }}
+      WINDOWS_TIMESTAMP_URL: ${{ secrets.SIMPLETEOOLS_WINDOWS_TIMESTAMP_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: .go-version
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install Wails CLI
+        shell: pwsh
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+      - name: Add Go tools to PATH
+        shell: pwsh
+        run: |
+          "$(go env GOPATH)\\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Install native tooling
+        shell: pwsh
+        run: choco install nsis -y
+      - name: Install frontend dependencies
+        shell: pwsh
+        working-directory: frontend
+        run: npm ci
+      - name: Build Windows application and NSIS installer
+        shell: pwsh
+        run: >-
+          wails build -platform windows/amd64 -tags "mupdf,nodynamic" -nsis -clean -trimpath
+          -webview2 download -ldflags "-X main.version=$env:APP_VERSION -X main.updatePublicKey=$env:UPDATE_PUBLIC_KEY"
+      - name: Stage Windows artifacts
+        shell: pwsh
+        run: |
+          $version = $env:APP_VERSION.TrimStart('v')
+          $release = Join-Path $env:GITHUB_WORKSPACE 'release'
+          $portable = Join-Path $release 'portable'
+          New-Item -ItemType Directory -Force -Path $portable | Out-Null
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'build\bin\SimpleTools.exe'
+          if (-not (Test-Path -LiteralPath $exe)) {
+            throw "Wails did not produce $exe"
+          }
+          $installer = Get-ChildItem -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'build\bin') -Filter '*-installer.exe' -File | Select-Object -First 1
+          if ($null -eq $installer) {
+            throw 'Wails did not produce an NSIS installer'
+          }
+          Copy-Item -LiteralPath $exe -Destination (Join-Path $portable 'SimpleTools.exe')
+          Copy-Item -LiteralPath 'LICENSE' -Destination $portable
+          Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.md' -Destination $portable
+          Copy-Item -LiteralPath 'internal/tools/assets/OFL-1.1.txt' -Destination $portable
+          Copy-Item -LiteralPath $installer.FullName -Destination (Join-Path $release "SimpleTools-$version-windows-amd64-installer.exe")
+          Copy-Item -LiteralPath 'LICENSE' -Destination $release
+          Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.md' -Destination $release
+          Copy-Item -LiteralPath 'internal/tools/assets/OFL-1.1.txt' -Destination $release
+      - name: Sign Windows binaries when certificate secrets are present
+        id: windows-signing
+        shell: pwsh
+        run: |
+          $release = Join-Path $env:GITHUB_WORKSPACE 'release'
+          $certB64 = $env:WINDOWS_CERTIFICATE_BASE64
+          $password = $env:WINDOWS_CERTIFICATE_PASSWORD
+          $signed = $false
+          if (-not [string]::IsNullOrWhiteSpace($certB64) -and -not [string]::IsNullOrWhiteSpace($password)) {
+            $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
+            if ($null -eq $signtool) {
+              $signtool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
+            }
+            if ($null -eq $signtool) {
+              throw 'signtool.exe was not found on the Windows runner'
+            }
+            $signtoolPath = if ($signtool.PSObject.Properties.Name -contains 'FullName') { $signtool.FullName } else { $signtool.Source }
+            if ([string]::IsNullOrWhiteSpace($signtoolPath)) {
+              throw 'Unable to resolve signtool.exe path'
+            }
+            $certPath = Join-Path $env:RUNNER_TEMP 'simpletools-signing.pfx'
+            try {
+              [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($certB64))
+              $timestamp = $env:WINDOWS_TIMESTAMP_URL
+              if ([string]::IsNullOrWhiteSpace($timestamp)) { $timestamp = 'https://timestamp.sectigo.com' }
+              Get-ChildItem -LiteralPath $release -Recurse -Filter '*.exe' -File | ForEach-Object {
+                & $signtoolPath sign /fd SHA256 /f $certPath /p $password /tr $timestamp /td SHA256 $_.FullName
+                if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed for $($_.Name)" }
+                & $signtoolPath verify /pa /all $_.FullName
+                if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for $($_.Name)" }
+              }
+              $signed = $true
+            } finally {
+              Remove-Item -LiteralPath $certPath -Force -ErrorAction SilentlyContinue
+            }
+          } else {
+            Write-Host 'Windows certificate secrets are not configured; keeping an unsigned test package.'
+          }
+          "signed=$($signed.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Create Windows portable archive and checksums
+        shell: pwsh
+        run: |
+          $version = $env:APP_VERSION.TrimStart('v')
+          $release = Join-Path $env:GITHUB_WORKSPACE 'release'
+          $portable = Join-Path $release 'portable'
+          Compress-Archive -Path (Join-Path $portable '*') -DestinationPath (Join-Path $release "SimpleTools-$version-windows-amd64-portable.zip") -CompressionLevel Optimal
+          Remove-Item -LiteralPath $portable -Recurse -Force
+          Get-ChildItem -LiteralPath $release -File | Get-FileHash -Algorithm SHA256 | ConvertTo-Json | Out-File -FilePath (Join-Path $release 'windows-sha256.json') -Encoding utf8
+          $status = "Windows Authenticode signed: $('${{ steps.windows-signing.outputs.signed }}')"
+          Set-Content -LiteralPath (Join-Path $release 'windows-signing.txt') -Value $status -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simpletools-windows
+          path: release/**
+          if-no-files-found: error
+
+  macos-arch:
+    name: macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-13
+            arch: amd64
+          - runner: macos-14
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      CGO_ENABLED: 1
+      UPDATE_PUBLIC_KEY: ${{ secrets.SIMPLETEOOLS_UPDATE_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: .go-version
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install Wails CLI
+        shell: bash
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+      - name: Add Go tools to PATH
+        shell: bash
+        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Build native macOS app
+        run: >-
+          wails build -platform darwin/${{ matrix.arch }} -tags "mupdf,nodynamic" -clean -trimpath -o SimpleTools
+          -ldflags "-X main.version=${APP_VERSION} -X main.updatePublicKey=${UPDATE_PUBLIC_KEY}"
+      - name: Stage native app
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${APP_VERSION#v}"
+          release="$GITHUB_WORKSPACE/release"
+          app="$GITHUB_WORKSPACE/build/bin/SimpleTools.app"
+          staged="$release/SimpleTools-${version}-macos-${{ matrix.arch }}.app"
+          test -d "$app" || { echo "Wails did not produce $app" >&2; exit 1; }
+          mkdir -p "$release"
+          ditto "$app" "$staged"
+          cp LICENSE THIRD_PARTY_NOTICES.md internal/tools/assets/OFL-1.1.txt "$staged/Contents/Resources/"
+          ditto -c -k --sequesterRsrc --keepParent "$staged" "$release/SimpleTools-${version}-macos-${{ matrix.arch }}.zip"
+          find "$release" -maxdepth 1 -type f -name '*.zip' -print0 | xargs -0 shasum -a 256 > "$release/macos-${{ matrix.arch }}-sha256.txt"
+          printf 'Native app is unsigned; signing is performed after universal merge.\n' > "$release/macos-${{ matrix.arch }}-signing.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simpletools-macos-${{ matrix.arch }}
+          path: release/**
+          if-no-files-found: error
+
+  macos-universal:
+    name: macOS universal package
+    needs: macos-arch
+    runs-on: macos-14
+    env:
+      MACOS_CERTIFICATE_BASE64: ${{ secrets.SIMPLETEOOLS_MACOS_CERTIFICATE_BASE64 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.SIMPLETEOOLS_MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.SIMPLETEOOLS_MACOS_SIGNING_IDENTITY }}
+      MACOS_TEAM_ID: ${{ secrets.SIMPLETEOOLS_MACOS_TEAM_ID }}
+      MACOS_NOTARY_PROFILE: ${{ secrets.SIMPLETEOOLS_MACOS_NOTARY_PROFILE }}
+      MACOS_NOTARY_APPLE_ID: ${{ secrets.SIMPLETEOOLS_MACOS_NOTARY_APPLE_ID }}
+      MACOS_NOTARY_PASSWORD: ${{ secrets.SIMPLETEOOLS_MACOS_NOTARY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Intel app
+        uses: actions/download-artifact@v4
+        with:
+          name: simpletools-macos-amd64
+          path: arch-artifacts/amd64
+      - name: Download Apple Silicon app
+        uses: actions/download-artifact@v4
+        with:
+          name: simpletools-macos-arm64
+          path: arch-artifacts/arm64
+      - name: Merge native apps into Universal app
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${APP_VERSION#v}"
+          intel_app="$(find "$GITHUB_WORKSPACE/arch-artifacts/amd64" -type d -name '*.app' -print -quit)"
+          silicon_app="$(find "$GITHUB_WORKSPACE/arch-artifacts/arm64" -type d -name '*.app' -print -quit)"
+          test -n "$intel_app" && test -n "$silicon_app" || { echo 'Both native .app artifacts are required' >&2; exit 1; }
+          test -f "$intel_app/Contents/MacOS/SimpleTools" || { echo 'Intel app executable is missing' >&2; exit 1; }
+          test -f "$silicon_app/Contents/MacOS/SimpleTools" || { echo 'Apple Silicon app executable is missing' >&2; exit 1; }
+          release="$GITHUB_WORKSPACE/release"
+          universal="$release/SimpleTools-${version}-macos-universal.app"
+          mkdir -p "$release"
+          ditto "$intel_app" "$universal"
+          lipo -create "$intel_app/Contents/MacOS/SimpleTools" "$silicon_app/Contents/MacOS/SimpleTools" -output "$universal/Contents/MacOS/SimpleTools"
+          cp LICENSE THIRD_PARTY_NOTICES.md internal/tools/assets/OFL-1.1.txt "$universal/Contents/Resources/"
+          lipo -info "$universal/Contents/MacOS/SimpleTools"
+      - name: Sign and notarize Universal app when Apple secrets are present
+        id: macos-signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          release="$GITHUB_WORKSPACE/release"
+          app="$(find "$release" -maxdepth 1 -type d -name '*-macos-universal.app' -print -quit)"
+          signed=false
+          notarized=false
+          if [[ -n "${MACOS_CERTIFICATE_BASE64:-}" && -n "${MACOS_CERTIFICATE_PASSWORD:-}" && -n "${MACOS_SIGNING_IDENTITY:-}" ]]; then
+            cert="$RUNNER_TEMP/simpletools-signing.p12"
+            keychain="$RUNNER_TEMP/simpletools-signing.keychain-db"
+            keychain_password="$(uuidgen)"
+            printf '%s' "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$cert"
+            security create-keychain -p "$keychain_password" "$keychain"
+            security set-keychain-settings -lut 21600 "$keychain"
+            security unlock-keychain -p "$keychain_password" "$keychain"
+            security import "$cert" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+            security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+            security list-keychains -d user -s "$keychain"
+            security default-keychain -s "$keychain"
+            codesign --deep --force --options runtime --timestamp --sign "$MACOS_SIGNING_IDENTITY" "$app"
+            codesign --verify --deep --strict --verbose=2 "$app"
+            signed=true
+            if [[ -n "${MACOS_NOTARY_APPLE_ID:-}" && -n "${MACOS_NOTARY_PASSWORD:-}" && -n "${MACOS_TEAM_ID:-}" ]]; then
+              profile="${MACOS_NOTARY_PROFILE:-simpletools-notary}"
+              xcrun notarytool store-credentials "$profile" --apple-id "$MACOS_NOTARY_APPLE_ID" --team-id "$MACOS_TEAM_ID" --password "$MACOS_NOTARY_PASSWORD" --keychain "$keychain"
+              dmg="$release/SimpleTools-${APP_VERSION#v}-macos-universal.dmg"
+              hdiutil create -volname SimpleTools -srcfolder "$app" -ov -format UDZO "$dmg"
+              xcrun notarytool submit "$dmg" --keychain-profile "$profile" --wait
+              xcrun stapler staple "$app"
+              xcrun stapler staple "$dmg"
+              notarized=true
+            else
+              echo 'Notarization secrets are incomplete; producing a signed but unnotarized test package.'
+            fi
+            security delete-keychain "$keychain" || true
+            rm -f "$cert"
+          else
+            echo 'Apple signing secrets are not configured; keeping an unsigned test package.'
+          fi
+          if [[ ! -f "$release/SimpleTools-${APP_VERSION#v}-macos-universal.dmg" ]]; then
+            hdiutil create -volname SimpleTools -srcfolder "$app" -ov -format UDZO "$release/SimpleTools-${APP_VERSION#v}-macos-universal.dmg"
+          fi
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$release/SimpleTools-${APP_VERSION#v}-macos-universal.zip"
+          printf 'Developer ID signed: %s\nNotarized: %s\n' "$signed" "$notarized" > "$release/macos-universal-signing.txt"
+          find "$release" -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.zip' \) -print0 | xargs -0 shasum -a 256 > "$release/macos-universal-sha256.txt"
+          echo "signed=$signed" >> "$GITHUB_OUTPUT"
+          echo "notarized=$notarized" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simpletools-macos-universal
+          path: release/**
+          if-no-files-found: error
+
+  package-release:
+    name: Assemble release and update manifest
+    needs: [windows, macos-universal]
+    if: ${{ needs.windows.result == 'success' && needs.macos-universal.result == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      UPDATE_PRIVATE_KEY_BASE64: ${{ secrets.SIMPLETEOOLS_UPDATE_PRIVATE_KEY_BASE64 }}
+      UPDATE_PUBLIC_KEY: ${{ secrets.SIMPLETEOOLS_UPDATE_PUBLIC_KEY }}
+      RELEASE_NOTES: ${{ inputs.notes }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: simpletools-windows
+          path: release-input/windows
+      - name: Download Universal macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: simpletools-macos-universal
+          path: release-input/macos
+      - name: Assemble release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${APP_VERSION#v}"
+          mkdir -p artifacts
+          find release-input/windows -type f \( -name "SimpleTools-${version}-windows-amd64-installer.exe" -o -name "SimpleTools-${version}-windows-amd64-portable.zip" \) -exec cp {} artifacts/ \;
+          find release-input/windows -type f \( -name 'windows-sha256.json' -o -name 'windows-signing.txt' \) -exec cp {} artifacts/ \;
+          find release-input/macos -type f \( -name "SimpleTools-${version}-macos-universal.dmg" -o -name "SimpleTools-${version}-macos-universal.zip" \) -exec cp {} artifacts/ \;
+          find release-input/macos -type f \( -name 'macos-universal-sha256.txt' -o -name 'macos-universal-signing.txt' \) -exec cp {} artifacts/ \;
+          test -f "artifacts/SimpleTools-${version}-windows-amd64-installer.exe"
+          test -f "artifacts/SimpleTools-${version}-macos-universal.dmg"
+          cp LICENSE THIRD_PARTY_NOTICES.md internal/tools/assets/OFL-1.1.txt artifacts/
+      - name: Sign update assets and generate manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${APP_VERSION#v}"
+          tag="v${version}"
+          key="$RUNNER_TEMP/simpletools-update-key.pem"
+          if [[ -n "${UPDATE_PRIVATE_KEY_BASE64:-}" ]]; then
+            printf '%s' "$UPDATE_PRIVATE_KEY_BASE64" | base64 --decode > "$key"
+            openssl pkey -in "$key" -pubout -out /dev/null
+            if [[ -z "${UPDATE_PUBLIC_KEY:-}" ]]; then
+              echo 'The update private key is configured but the matching public key is missing.' >&2
+              exit 1
+            fi
+            derived_public_key="$(openssl pkey -in "$key" -pubout -outform DER | tail -c 32 | base64 | tr -d '\n')"
+            configured_public_key="$(printf '%s' "$UPDATE_PUBLIC_KEY" | base64 --decode | base64 | tr -d '\n')"
+            if [[ "$derived_public_key" != "$configured_public_key" ]]; then
+              echo 'SIMPLETEOOLS_UPDATE_PUBLIC_KEY does not match the configured private key.' >&2
+              exit 1
+            fi
+            while IFS= read -r asset; do
+              openssl pkeyutl -sign -rawin -inkey "$key" -in "$asset" -out "$asset.sig"
+            done < <(find artifacts -maxdepth 1 -type f \( -name "SimpleTools-${version}-windows-amd64-installer.exe" -o -name "SimpleTools-${version}-windows-amd64-portable.zip" -o -name "SimpleTools-${version}-macos-universal.dmg" \) | sort)
+          else
+            echo 'Ed25519 update key is not configured; manifest will be unsigned and publication will be skipped.'
+          fi
+          python3 - "$version" "$tag" <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import sys
+
+          version, tag = sys.argv[1:]
+          root = pathlib.Path('artifacts')
+          repo = os.environ['GITHUB_REPOSITORY']
+          base = f"{os.environ['GITHUB_SERVER_URL']}/{repo}/releases/download/{tag}"
+          specs = [
+              (f"SimpleTools-{version}-windows-amd64-installer.exe", "windows", "amd64", "windows-amd64-installer"),
+              (f"SimpleTools-{version}-windows-amd64-portable.zip", "windows", "amd64", "windows-amd64-portable"),
+              # The application is a universal binary, but the client reports its
+              # native GOARCH. Point both supported macOS architectures at the same DMG.
+              (f"SimpleTools-{version}-macos-universal.dmg", "darwin", "amd64", "darwin-amd64-dmg"),
+              (f"SimpleTools-{version}-macos-universal.dmg", "darwin", "arm64", "darwin-arm64-dmg"),
+          ]
+          assets = []
+          for filename, platform, architecture, asset_id in specs:
+              path = root / filename
+              data = path.read_bytes()
+              signature_path = pathlib.Path(str(path) + '.sig')
+              if os.environ.get('UPDATE_PRIVATE_KEY_BASE64', '').strip() and not signature_path.exists():
+                  raise SystemExit(f'missing Ed25519 signature for {filename}')
+              signature = base64.b64encode(signature_path.read_bytes()).decode('ascii') if signature_path.exists() else ''
+              assets.append({
+                  'id': asset_id,
+                  'version': version,
+                  'platform': platform,
+                  'architecture': architecture,
+                  'url': f'{base}/{filename}',
+                  'sha256': hashlib.sha256(data).hexdigest(),
+                  'signature': signature,
+                  'size': len(data),
+              })
+          notes = os.environ.get('RELEASE_NOTES', '').strip()
+          if not notes:
+              notes = 'SimpleTools release ' + version
+          manifest = {'version': version, 'notes': notes, 'assets': assets}
+          (root / 'update-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+          with (root / 'SHA256SUMS.txt').open('w', encoding='utf-8') as checksums:
+              for path in sorted(root.iterdir()):
+                  if path.is_file() and not path.name.endswith('.sig') and path.name != 'SHA256SUMS.txt':
+                      checksums.write(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n")
+          PY
+          rm -f artifacts/*.sig "$key"
+      - name: Upload unsigned or signed test bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: simpletools-release-test
+          path: artifacts/**
+          if-no-files-found: error
+      - name: Check whether official publication is allowed
+        id: signing-gate
+        shell: bash
+        env:
+          PUBLISH_REQUESTED: ${{ inputs.publish }}
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.SIMPLETEOOLS_WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.SIMPLETEOOLS_WINDOWS_CERTIFICATE_PASSWORD }}
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.SIMPLETEOOLS_MACOS_CERTIFICATE_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.SIMPLETEOOLS_MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ secrets.SIMPLETEOOLS_MACOS_SIGNING_IDENTITY }}
+          MACOS_NOTARY_APPLE_ID: ${{ secrets.SIMPLETEOOLS_MACOS_NOTARY_APPLE_ID }}
+          MACOS_NOTARY_PASSWORD: ${{ secrets.SIMPLETEOOLS_MACOS_NOTARY_PASSWORD }}
+          MACOS_TEAM_ID: ${{ secrets.SIMPLETEOOLS_MACOS_TEAM_ID }}
+          UPDATE_PRIVATE_KEY_BASE64: ${{ secrets.SIMPLETEOOLS_UPDATE_PRIVATE_KEY_BASE64 }}
+          UPDATE_PUBLIC_KEY: ${{ secrets.SIMPLETEOOLS_UPDATE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ "$PUBLISH_REQUESTED" == 'true' ]] || missing+=("publish input disabled")
+          [[ -n "$WINDOWS_CERTIFICATE_BASE64" ]] || missing+=("Windows certificate")
+          [[ -n "$WINDOWS_CERTIFICATE_PASSWORD" ]] || missing+=("Windows certificate password")
+          [[ -n "$MACOS_CERTIFICATE_BASE64" ]] || missing+=("macOS certificate")
+          [[ -n "$MACOS_CERTIFICATE_PASSWORD" ]] || missing+=("macOS certificate password")
+          [[ -n "$MACOS_SIGNING_IDENTITY" ]] || missing+=("Developer ID identity")
+          [[ -n "$MACOS_NOTARY_APPLE_ID" ]] || missing+=("notarization Apple ID")
+          [[ -n "$MACOS_NOTARY_PASSWORD" ]] || missing+=("notarization password")
+          [[ -n "$MACOS_TEAM_ID" ]] || missing+=("Apple team ID")
+          [[ -n "$UPDATE_PRIVATE_KEY_BASE64" ]] || missing+=("Ed25519 update key")
+          [[ -n "$UPDATE_PUBLIC_KEY" ]] || missing+=("Ed25519 update public key")
+          [[ -f artifacts/windows-signing.txt ]] && grep -Fq 'Windows Authenticode signed: true' artifacts/windows-signing.txt || missing+=("Windows Authenticode signature")
+          [[ -f artifacts/macos-universal-signing.txt ]] && grep -Fq 'Developer ID signed: true' artifacts/macos-universal-signing.txt || missing+=("macOS Developer ID signature")
+          [[ -f artifacts/macos-universal-signing.txt ]] && grep -Fq 'Notarized: true' artifacts/macos-universal-signing.txt || missing+=("macOS notarization")
+          if (( ${#missing[@]} == 0 )); then
+            echo 'can_publish=true' >> "$GITHUB_OUTPUT"
+            echo 'All signing material is configured; official publication is enabled.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'can_publish=false' >> "$GITHUB_OUTPUT"
+            printf 'Official publication skipped. Missing: %s\n' "${missing[*]}" >> "$GITHUB_STEP_SUMMARY"
+            echo 'The unsigned/signed test bundle above remains available as a workflow artifact.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Publish GitHub Release
+        if: ${{ steps.signing-gate.outputs.can_publish == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${APP_VERSION#v}"
+          notes_file="$RUNNER_TEMP/simpletools-release-notes.md"
+          printf '%s\n' "${RELEASE_NOTES:-SimpleTools release $version}" > "$notes_file"
+          gh release create "v$version" artifacts/* --repo "$GITHUB_REPOSITORY" --title "SimpleTools $version" --notes-file "$notes_file"
+          echo "Published signed release v$version." >> "$GITHUB_STEP_SUMMARY"

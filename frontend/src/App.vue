@@ -1,0 +1,83 @@
+<script setup lang="ts">
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { Download, FileImage, FileOutput, FileText, Languages, Loader2, Moon, Settings, Sun, X, Zap } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
+import { useWorkspaceStore } from './stores/workspace'
+import type { ToolId } from './types'
+import type { UpdateInfo, UpdateProgress } from './types'
+import { wailsService } from './services/wails'
+import { initPreferences, isDark, setThemeMode } from './preferences'
+
+const route = useRoute(); const router = useRouter(); const store = useWorkspaceStore(); const { t, locale } = useI18n()
+const dark = isDark
+const updateInfo = ref<UpdateInfo>()
+const updateProgress = ref<UpdateProgress>()
+const updateError = ref('')
+let stopUpdateAvailable: () => void = () => undefined
+let stopUpdateProgress: () => void = () => undefined
+const tools = computed(() => [
+  { id: 'convert' as ToolId, icon: FileOutput, label: t('convert'), detail: t('convertDesc') },
+  { id: 'compress' as ToolId, icon: FileImage, label: t('compress'), detail: t('compressDesc') },
+  { id: 'pdf' as ToolId, icon: FileText, label: t('pdf'), detail: t('pdfDesc') },
+])
+watch(() => route.params.tool, (tool) => { if (tool) store.setTool(tool as ToolId) }, { immediate: true })
+watch(locale, value => {
+  if (typeof window === 'undefined') return
+  try { window.localStorage.setItem('simpletools-language', value) } catch { /* preferences are best effort */ }
+})
+onMounted(() => {
+  initPreferences()
+  if (!wailsService.isNative()) return
+  stopUpdateAvailable = wailsService.onUpdateAvailable(info => { if (info.available) updateInfo.value = info })
+  stopUpdateProgress = wailsService.onUpdateProgress(progress => {
+    updateProgress.value = progress
+    if (progress.state === 'failed') updateError.value = t('updateFailed')
+  })
+  void wailsService.checkForUpdate().then(info => { if (info.available) updateInfo.value = info }).catch(() => undefined)
+})
+onUnmounted(() => { stopUpdateAvailable(); stopUpdateProgress() })
+function navigate(id: ToolId) { store.setTool(id); router.push(`/${id}`) }
+function toggleTheme() { setThemeMode(dark.value ? 'light' : 'dark') }
+function toggleLocale() { locale.value = locale.value === 'en' ? 'zh' : 'en' }
+async function installUpdate() {
+  if (!updateInfo.value || updateProgress.value?.state === 'started') return
+  updateError.value = ''
+  updateProgress.value = { assetId: updateInfo.value.assetId ?? '', state: 'started', progress: 0 }
+  try {
+    await wailsService.downloadAndInstallUpdate(updateInfo.value.assetId ?? '')
+  } catch (error) {
+    updateError.value = error instanceof Error ? error.message : t('updateFailed')
+    updateProgress.value = { assetId: updateInfo.value.assetId ?? '', state: 'failed', progress: 0 }
+  }
+}
+</script>
+
+<template>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark"><Zap :size="16" /></span><span>{{ t('appName') }}</span></div>
+      <div class="sidebar-section-label">{{ t('nav') }}</div>
+      <nav class="tool-nav">
+        <button v-for="tool in tools" :key="tool.id" class="tool-link" :class="{ active: store.activeTool === tool.id }" @click="navigate(tool.id)">
+          <component :is="tool.icon" :size="18" /><span>{{ tool.label }}</span>
+        </button>
+      </nav>
+      <div class="sidebar-bottom">
+        <button class="tool-link" :class="{ active: route.path === '/settings' }" @click="router.push('/settings')"><Settings :size="18" /><span>{{ t('preferences') }}</span></button>
+        <div class="sidebar-note"><span class="status-dot"></span><span>{{ t('saved') }}</span></div>
+      </div>
+    </aside>
+    <main class="main-content">
+      <header class="topbar"><div class="mobile-brand"><span class="brand-mark"><Zap :size="15" /></span>{{ t('appName') }}</div><div class="topbar-actions"><button v-if="updateInfo?.available" class="update-button" :title="t('updateAvailable')" @click="installUpdate"><Loader2 v-if="updateProgress?.state === 'started'" class="spin" :size="16" /><Download v-else :size="16" /><span>{{ updateProgress?.state === 'started' ? t('updating') : `${t('updateAvailable')} · ${updateInfo.version}` }}</span></button><button class="icon-button" :title="t('language')" @click="toggleLocale"><Languages :size="18" /><span class="lang-label">{{ locale === 'en' ? '中' : 'EN' }}</span></button><button class="icon-button" :title="t('theme')" @click="toggleTheme"><Sun v-if="dark" :size="18" /><Moon v-else :size="18" /></button></div></header>
+      <nav class="mobile-tool-nav" :aria-label="t('nav')">
+        <button v-for="tool in tools" :key="tool.id" class="mobile-tool-link" :class="{ active: store.activeTool === tool.id }" @click="navigate(tool.id)">
+          <component :is="tool.icon" :size="16" /><span>{{ tool.label }}</span>
+        </button>
+        <button class="mobile-tool-link" :class="{ active: route.path === '/settings' }" @click="router.push('/settings')"><Settings :size="16" /><span>{{ t('preferences') }}</span></button>
+      </nav>
+      <div v-if="updateError" class="update-error" role="status"><span>{{ updateError }}</span><button class="icon-button small" :title="t('dismiss')" @click="updateError = ''"><X :size="14" /></button></div>
+      <div class="content-wrap"><RouterView /></div>
+    </main>
+  </div>
+</template>
