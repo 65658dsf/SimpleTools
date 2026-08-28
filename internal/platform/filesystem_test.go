@@ -60,3 +60,23 @@ func TestAtomicWriteRejectsSymlinkedDirectory(t *testing.T) {
 		t.Fatalf("symlink target was written: %v", err)
 	}
 }
+
+func TestAtomicWriteRejectsSymlinkedAncestorDirectory(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	dir := filepath.Join(alias, "target")
+	err := AtomicWrite(dir, "result.txt", func(w io.Writer) error { _, e := w.Write([]byte("nope")); return e })
+	if err == nil {
+		t.Fatal("expected symlinked ancestor output directory to be rejected")
+	}
+	if _, err := os.Stat(filepath.Join(target, "result.txt")); !os.IsNotExist(err) {
+		t.Fatalf("symlink target was written: %v", err)
+	}
+}

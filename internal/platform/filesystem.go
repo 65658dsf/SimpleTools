@@ -109,6 +109,13 @@ func AtomicWrite(dir, name string, write func(io.Writer) error) error {
 	// A caller can create a nested output directory from user-controlled
 	// relative input paths. Refuse symlinked directories so the lexical output
 	// root cannot be redirected outside itself between allocation and rename.
+	linked, err := pathContainsLink(dir)
+	if err != nil {
+		return err
+	}
+	if linked {
+		return fmt.Errorf("output directory %q contains a symbolic link", dir)
+	}
 	resolvedDir, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		return err
@@ -194,8 +201,55 @@ func IsWithin(parent, child string) (bool, error) {
 func samePath(a, b string) bool {
 	a = filepath.Clean(a)
 	b = filepath.Clean(b)
+	if normalized, err := normalizePathAliases(a); err == nil {
+		a = filepath.Clean(normalized)
+	}
+	if normalized, err := normalizePathAliases(b); err == nil {
+		b = filepath.Clean(normalized)
+	}
 	if runtime.GOOS == "windows" {
 		return strings.EqualFold(a, b)
 	}
 	return a == b
+}
+
+// pathContainsLink reports whether any existing component of path is a
+// symbolic link or another path reparse point. AtomicWrite calls this after
+// creating the directory tree so a user-controlled relative directory cannot
+// redirect output outside the selected root.
+func pathContainsLink(path string) (bool, error) {
+	abs, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return false, err
+	}
+	volume := filepath.VolumeName(abs)
+	rest := strings.TrimPrefix(abs, volume)
+	current := volume
+	if strings.HasPrefix(rest, string(filepath.Separator)) {
+		current += string(filepath.Separator)
+		rest = strings.TrimLeft(rest, string(filepath.Separator))
+	}
+	for rest != "" {
+		part := rest
+		if index := strings.IndexByte(part, filepath.Separator); index >= 0 {
+			part, rest = part[:index], strings.TrimLeft(part[index+1:], string(filepath.Separator))
+		} else {
+			rest = ""
+		}
+		if part == "" || part == "." {
+			continue
+		}
+		current = filepath.Join(current, part)
+		info, statErr := os.Lstat(current)
+		if os.IsNotExist(statErr) {
+			return false, nil
+		}
+		if statErr != nil {
+			return false, statErr
+		}
+		if isLinkComponent(current, info) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
