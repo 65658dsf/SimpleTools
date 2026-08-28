@@ -40,3 +40,5 @@ func isLinkComponent(path string, info os.FileInfo) bool {
 	_, err := os.Readlink(path)
 	return err == nil
 }
+
+func isTrustedLinkComponent(string) bool { return false }

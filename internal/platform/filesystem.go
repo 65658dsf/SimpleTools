@@ -201,6 +201,7 @@ func IsWithin(parent, child string) (bool, error) {
 func samePath(a, b string) bool {
 	a = filepath.Clean(a)
 	b = filepath.Clean(b)
+	originalA, originalB := a, b
 	if normalized, err := normalizePathAliases(a); err == nil {
 		a = filepath.Clean(normalized)
 	}
@@ -208,9 +209,19 @@ func samePath(a, b string) bool {
 		b = filepath.Clean(normalized)
 	}
 	if runtime.GOOS == "windows" {
-		return strings.EqualFold(a, b)
+		if strings.EqualFold(a, b) {
+			return true
+		}
+	} else if a == b {
+		return true
 	}
-	return a == b
+	// EvalSymlinks canonicalizes trusted system aliases (for example,
+	// macOS /var -> /private/var). Compare file identity for those aliases.
+	// A symbolic link used as the output directory itself describes a different
+	// file under Lstat, so it still fails this check.
+	left, leftErr := os.Lstat(originalA)
+	right, rightErr := os.Lstat(originalB)
+	return leftErr == nil && rightErr == nil && os.SameFile(left, right)
 }
 
 // pathContainsLink reports whether any existing component of path is a
@@ -247,7 +258,7 @@ func pathContainsLink(path string) (bool, error) {
 		if statErr != nil {
 			return false, statErr
 		}
-		if isLinkComponent(current, info) {
+		if isLinkComponent(current, info) && !isTrustedLinkComponent(current) {
 			return true, nil
 		}
 	}
