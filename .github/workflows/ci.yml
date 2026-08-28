@@ -13,6 +13,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: .go-version
+      - name: Normalize source line endings
+        shell: pwsh
+        run: |
+          git config --local core.autocrlf false
+          git config --local core.eol lf
+          git checkout-index --force --all
       - name: Install Wails CLI
         shell: pwsh
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
