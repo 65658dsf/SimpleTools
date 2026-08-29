@@ -2,15 +2,13 @@
 
 package tools
 
-/*
-MuPDF's prebuilt go-fitz archives intentionally omit their bundled CJK fonts.
-Keep the fallback font in the application and install it through MuPDF's CJK
-and generic fallback callbacks for every document context.
-
-The declarations below intentionally mirror the small public subset of the
-MuPDF API we use. go-fitz owns the platform-specific include and linker flags,
-so this package does not duplicate or hard-code its module-cache paths.
-*/
+// MuPDF's prebuilt go-fitz archives intentionally omit their bundled CJK fonts.
+// Keep the fallback font in the application and install it through MuPDF's CJK
+// and generic fallback callbacks for every document context.
+//
+// The declarations below intentionally mirror the small public subset of the
+// MuPDF API we use. go-fitz owns the platform-specific include and linker flags,
+// so this package does not duplicate or hard-code its module-cache paths.
 /*
 #include <stddef.h>
 #include <stdlib.h>
