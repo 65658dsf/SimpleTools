@@ -39,7 +39,8 @@ verification. The frontend does not read arbitrary local files through browser A
 
 ## Job flow
 
-1. The UI obtains paths from native dialogs or the Wails file-drop event.
+1. The UI obtains paths from native dialogs or the Wails file-drop event. If no output directory is
+   selected, Go uses and creates `output` beside the running application executable.
 2. Go canonicalizes paths, recursively expands folder inputs, deduplicates files, and validates
    the selected tool options.
 3. `StartJob` returns an opaque job id immediately. A bounded worker pool processes files and
@@ -47,7 +48,9 @@ verification. The frontend does not read arbitrary local files through browser A
 4. Each output is written to a random temporary file in its final directory, synced, and renamed
    atomically. A collision suffix is selected without replacing an existing file.
 5. Cancellation propagates through `context.Context`; workers remove incomplete temporary files.
-   Successful outputs remain available when another item fails.
+   Successful outputs remain available when another item fails. After a non-cancelled job with
+   outputs completes, the native file manager is opened and generated files are revealed where the
+   platform supports file selection.
 
 Folder jobs mirror the input folder's relative structure below the chosen output directory.
 PDF inputs use a per-document subdirectory and one PNG per selected page.
@@ -82,6 +85,7 @@ The Wails binding is the only UI/backend boundary:
 - `PreviewImage` returns dimensions and a bounded thumbnail data URL only.
 - `StartJob`, `GetJob`, and `CancelJob` manage asynchronous work.
 - `OpenOutputDirectory` reveals a validated output directory through the host platform.
+- `GetDefaultOutputDirectory` returns the executable-relative fallback output directory.
 - `CheckForUpdate` and `DownloadAndInstallUpdate` handle signed GitHub release assets after user
   confirmation.
 

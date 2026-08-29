@@ -12,6 +12,9 @@ Current tools:
 
 The application is built with Go, Wails, Vue 3, Vite, and shadcn-vue. File processing stays on
 the local machine. The only network operation is the optional signed update check.
+When no output directory is selected, results are written to `output` beside the running
+application. After a successful or partially successful job, the native file manager opens and
+reveals the generated files when the platform supports it.
 
 ## Development
 

@@ -40,6 +40,7 @@ const nativeService: WailsService = {
   openInputFilesFromPaths: paths => App.OpenInputFilesFromPaths(paths) as Promise<NativeInputFile[]>,
   openInputFolder: () => App.OpenInputFolder() as Promise<NativeInputFile[]>,
   chooseOutputDirectory: () => App.ChooseOutputDirectory(),
+  getDefaultOutputDirectory: () => App.GetDefaultOutputDirectory(),
   openOutputDirectory: path => App.OpenOutputDirectory(path),
   previewImage: (path, options = {}) => App.PreviewImage(path, options as never) as Promise<Preview>,
   startJob: request => App.StartJob(request as never),
@@ -61,6 +62,7 @@ const browserService: WailsService = {
   async openInputFilesFromPaths() { return [] },
   async openInputFolder() { return [] },
   async chooseOutputDirectory() { return '' },
+  async getDefaultOutputDirectory() { return '' },
   async openOutputDirectory() { return undefined },
   async previewImage(path, options: PreviewOptions = {}) {
     const img = new Image()

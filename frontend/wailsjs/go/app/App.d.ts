@@ -12,6 +12,8 @@ export function ChooseOutputDirectory():Promise<string>;
 
 export function DownloadAndInstallUpdate(arg1:string):Promise<void>;
 
+export function GetDefaultOutputDirectory():Promise<string>;
+
 export function GetJob(arg1:string):Promise<app.JobStatus>;
 
 export function OpenInputFiles():Promise<Array<app.InputFile>>;

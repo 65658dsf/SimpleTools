@@ -38,6 +38,9 @@ type App struct {
 	pdfSlots   chan struct{}
 	version    string
 	lastUpdate *UpdateInfo
+	// These hooks keep filesystem/UI side effects injectable in backend tests.
+	defaultOutputDir func() (string, error)
+	revealOutputs    func([]string) error
 }
 
 type InputFile struct {
@@ -347,6 +350,13 @@ func (a *App) ChooseOutputDirectory() (string, error) {
 	return validateOutputDirectory(path)
 }
 
+// GetDefaultOutputDirectory returns the directory used when a job request does
+// not specify an output directory. It is exposed so the frontend can show the
+// actual destination while the backend remains the source of truth.
+func (a *App) GetDefaultOutputDirectory() (string, error) {
+	return a.defaultOutputDirectory()
+}
+
 func (a *App) OpenOutputDirectory(path string) error {
 	path, err := validateOutputDirectory(path)
 	if err != nil {
@@ -372,6 +382,33 @@ func validateOutputDirectory(path string) (string, error) {
 		return "", fmt.Errorf("resolve output directory: %w", err)
 	}
 	return filepath.Abs(filepath.Clean(resolved))
+}
+
+func (a *App) defaultOutputDirectory() (string, error) {
+	if a.defaultOutputDir != nil {
+		return a.defaultOutputDir()
+	}
+	return platform.DefaultOutputDirectory()
+}
+
+func (a *App) revealJobOutputs(paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	a.mu.RLock()
+	ready := a.ctx != nil
+	reveal := a.revealOutputs
+	a.mu.RUnlock()
+	// Unit tests and embedders do not have a Wails runtime. An explicit hook is
+	// still honored so completion behavior remains testable without launching a
+	// host file manager.
+	if reveal == nil {
+		if !ready {
+			return
+		}
+		reveal = platform.RevealFiles
+	}
+	_ = reveal(paths)
 }
 
 func (a *App) PreviewImage(path string, options PreviewOptions) (*Preview, error) {
@@ -439,11 +476,23 @@ func max(a, b int) int {
 }
 
 func (a *App) StartJob(req tools.JobRequest) (string, error) {
+	outputDir := strings.TrimSpace(req.OutputDirectory)
+	if outputDir == "" {
+		var defaultErr error
+		outputDir, defaultErr = a.defaultOutputDirectory()
+		if defaultErr != nil {
+			return "", fmt.Errorf("default output directory: %w", defaultErr)
+		}
+		if err := os.MkdirAll(outputDir, 0o755); err != nil {
+			return "", fmt.Errorf("create default output directory: %w", err)
+		}
+	}
+	req.OutputDirectory = outputDir
 	format, err := req.Validate()
 	if err != nil {
 		return "", err
 	}
-	outputDir, err := validateOutputDirectory(req.OutputDirectory)
+	outputDir, err = validateOutputDirectory(outputDir)
 	if err != nil {
 		return "", fmt.Errorf("output directory: %w", err)
 	}
@@ -638,6 +687,9 @@ func (a *App) run(ctx context.Context, j *job, req tools.JobRequest, format tool
 	}
 	a.finish(j)
 	status := a.snapshot(j)
+	if status.State != "cancelled" {
+		a.revealJobOutputs(status.Outputs)
+	}
 	a.emit("job:completed", status)
 	if status.Failed > 0 {
 		a.emit("job:failed", status)

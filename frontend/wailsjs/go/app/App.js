@@ -18,6 +18,10 @@ export function DownloadAndInstallUpdate(arg1) {
   return window['go']['app']['App']['DownloadAndInstallUpdate'](arg1);
 }
 
+export function GetDefaultOutputDirectory() {
+  return window['go']['app']['App']['GetDefaultOutputDirectory']();
+}
+
 export function GetJob(arg1) {
   return window['go']['app']['App']['GetJob'](arg1);
 }

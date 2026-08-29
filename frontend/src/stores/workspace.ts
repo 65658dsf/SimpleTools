@@ -92,8 +92,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const progress = computed(() => files.value.length ? Math.round(files.value.reduce((sum, item) => sum + item.progress, 0) / files.value.length) : 0)
   const isEligible = (item: QueueFile) => settings.value.recursive || !item.relativePath
   const canProcess = computed(() => {
-    const outputReady = !wailsService.isNative() || outputDir.value.trim().length > 0
-    return outputReady && !running.value && files.value.some(item => isEligible(item) && (item.status === 'queued' || item.status === 'error'))
+    return !running.value && files.value.some(item => isEligible(item) && (item.status === 'queued' || item.status === 'error'))
   })
 
   watch(outputDir, value => writeStorage('simpletools-output', value))
@@ -202,8 +201,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (selected) setOutputDir(selected)
   }
 
+  async function loadDefaultOutputDirectory() {
+    if (!wailsService.isNative() || outputDir.value.trim()) return
+    try {
+      const selected = await wailsService.getDefaultOutputDirectory()
+      if (selected && !outputDir.value.trim()) setOutputDir(selected)
+    } catch {
+      // The backend still applies the default when processing starts.
+    }
+  }
+
   async function openOutputDirectory() {
-    if (outputDir.value && wailsService.isNative()) await wailsService.openOutputDirectory(outputDir.value)
+    if (!wailsService.isNative()) return
+    await loadDefaultOutputDirectory()
+    if (outputDir.value.trim()) await wailsService.openOutputDirectory(outputDir.value)
   }
 
   function removeFile(fileId: string) { const item = files.value.find(entry => entry.id === fileId); if (!item || item.status === 'processing') return; releasePreview(item); files.value = files.value.filter(entry => entry.id !== fileId) }
@@ -311,5 +322,5 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function simulateProgress(item: QueueFile) { for (const value of [20, 45, 70, 90]) { await new Promise(resolve => setTimeout(resolve, 100)); if (cancelRequested.value) return false; item.progress = value } return true }
 
-  return { activeTool, files, outputDir, running, settings, completeCount, progress, canProcess, setTool, addFiles, addNativeFiles, addNativePaths, browseFiles, browseFolder, chooseOutput, openOutputDirectory, removeFile, clearFiles, process, cancel, retry, setOutputDir }
+  return { activeTool, files, outputDir, running, settings, completeCount, progress, canProcess, setTool, addFiles, addNativeFiles, addNativePaths, browseFiles, browseFolder, chooseOutput, loadDefaultOutputDirectory, openOutputDirectory, removeFile, clearFiles, process, cancel, retry, setOutputDir }
 })

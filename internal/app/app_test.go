@@ -66,6 +66,49 @@ func TestStartJobConvertsPNGToJPEG(t *testing.T) {
 	}
 }
 
+func TestStartJobUsesDefaultOutputDirectoryWhenUnset(t *testing.T) {
+	d := t.TempDir()
+	in := filepath.Join(d, "input.png")
+	f, err := os.Create(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(d, "default-output")
+	revealed := make(chan []string, 1)
+	a := New()
+	a.defaultOutputDir = func() (string, error) { return out, nil }
+	a.revealOutputs = func(paths []string) error {
+		revealed <- append([]string(nil), paths...)
+		return nil
+	}
+	id, err := a.StartJob(tools.JobRequest{Inputs: []string{in}, Format: "jpeg", Quality: 80})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := waitForTerminalJob(t, a, id)
+	if status.State != "completed" || len(status.Outputs) != 1 {
+		t.Fatalf("unexpected status %#v", status)
+	}
+	if filepath.Dir(status.Outputs[0]) != out {
+		t.Fatalf("expected output below default directory %q, got %q", out, status.Outputs[0])
+	}
+	select {
+	case paths := <-revealed:
+		if len(paths) != 1 || paths[0] != status.Outputs[0] {
+			t.Fatalf("unexpected revealed paths %#v", paths)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("output reveal was not requested")
+	}
+}
+
 func TestExpandJobInputsRejectsRelativeDirectoryEscape(t *testing.T) {
 	d := t.TempDir()
 	in := filepath.Join(d, "input.png")

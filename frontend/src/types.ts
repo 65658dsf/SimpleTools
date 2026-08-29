@@ -87,6 +87,7 @@ export interface WailsService {
   openInputFilesFromPaths(paths: string[]): Promise<NativeInputFile[]>
   openInputFolder(): Promise<NativeInputFile[]>
   chooseOutputDirectory(): Promise<string>
+  getDefaultOutputDirectory(): Promise<string>
   openOutputDirectory(path: string): Promise<void>
   previewImage(path: string, options?: PreviewOptions): Promise<Preview>
   startJob(request: JobRequest): Promise<string>

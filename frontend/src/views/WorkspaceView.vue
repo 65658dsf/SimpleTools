@@ -27,7 +27,11 @@ function browse() { if (wailsService.isNative()) void store.browseFiles(); else 
 function browseFolder() { void store.browseFolder() }
 function formatSize(bytes: number) { if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`; return `${(bytes / 1024 / 1024).toFixed(1)} MB` }
 function rowIcon(type: string) { return type === 'application/pdf' ? FileText : FileImage }
-onMounted(() => { if (wailsService.isNative()) OnFileDrop((_x, _y, paths) => { void store.addNativePaths(paths) }, true) })
+onMounted(() => {
+  if (!wailsService.isNative()) return
+  void store.loadDefaultOutputDirectory()
+  OnFileDrop((_x, _y, paths) => { void store.addNativePaths(paths) }, true)
+})
 onUnmounted(() => { if (wailsService.isNative()) OnFileDropOff() })
 </script>
 
