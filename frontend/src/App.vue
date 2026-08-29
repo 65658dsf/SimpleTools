@@ -38,6 +38,7 @@ onMounted(() => {
 })
 onUnmounted(() => { stopUpdateAvailable(); stopUpdateProgress() })
 function navigate(id: ToolId) { store.setTool(id); router.push(`/${id}`) }
+function isToolRoute(id: ToolId) { return route.path === `/${id}` }
 function toggleTheme() { setThemeMode(dark.value ? 'light' : 'dark') }
 function toggleLocale() { locale.value = locale.value === 'en' ? 'zh' : 'en' }
 async function installUpdate() {
@@ -59,7 +60,7 @@ async function installUpdate() {
       <div class="brand"><span class="brand-mark"><Zap :size="16" /></span><span>{{ t('appName') }}</span></div>
       <div class="sidebar-section-label">{{ t('nav') }}</div>
       <nav class="tool-nav">
-        <button v-for="tool in tools" :key="tool.id" class="tool-link" :class="{ active: store.activeTool === tool.id }" @click="navigate(tool.id)">
+        <button v-for="tool in tools" :key="tool.id" class="tool-link" :class="{ active: isToolRoute(tool.id) }" @click="navigate(tool.id)">
           <component :is="tool.icon" :size="18" /><span>{{ tool.label }}</span>
         </button>
       </nav>
@@ -71,7 +72,7 @@ async function installUpdate() {
     <main class="main-content">
       <header class="topbar"><div class="mobile-brand"><span class="brand-mark"><Zap :size="15" /></span>{{ t('appName') }}</div><div class="topbar-actions"><button v-if="updateInfo?.available" class="update-button" :title="t('updateAvailable')" @click="installUpdate"><Loader2 v-if="updateProgress?.state === 'started'" class="spin" :size="16" /><Download v-else :size="16" /><span>{{ updateProgress?.state === 'started' ? t('updating') : `${t('updateAvailable')} · ${updateInfo.version}` }}</span></button><button class="icon-button" :title="t('language')" @click="toggleLocale"><Languages :size="18" /><span class="lang-label">{{ locale === 'en' ? '中' : 'EN' }}</span></button><button class="icon-button" :title="t('theme')" @click="toggleTheme"><Sun v-if="dark" :size="18" /><Moon v-else :size="18" /></button></div></header>
       <nav class="mobile-tool-nav" :aria-label="t('nav')">
-        <button v-for="tool in tools" :key="tool.id" class="mobile-tool-link" :class="{ active: store.activeTool === tool.id }" @click="navigate(tool.id)">
+        <button v-for="tool in tools" :key="tool.id" class="mobile-tool-link" :class="{ active: isToolRoute(tool.id) }" @click="navigate(tool.id)">
           <component :is="tool.icon" :size="16" /><span>{{ tool.label }}</span>
         </button>
         <button class="mobile-tool-link" :class="{ active: route.path === '/settings' }" @click="router.push('/settings')"><Settings :size="16" /><span>{{ t('preferences') }}</span></button>
