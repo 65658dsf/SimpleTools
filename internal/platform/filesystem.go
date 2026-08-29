@@ -18,7 +18,7 @@ import (
 var atomicRenameMu sync.Mutex
 
 var imageExts = map[string]bool{
-	".png": true, ".jpg": true, ".jpeg": true, ".webp": true, ".avif": true,
+	".png": true, ".jpg": true, ".jpeg": true, ".webp": true, ".avif": true, ".ico": true, ".svg": true,
 }
 
 func IsPDFPath(path string) bool   { return strings.EqualFold(filepath.Ext(path), ".pdf") }

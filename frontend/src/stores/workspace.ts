@@ -8,10 +8,14 @@ function stripExtension(name: string) { return name.replace(/\.[^/.]+$/, '') }
 function extension(name: string) { return name.match(/\.[^/.]+$/)?.[0] || '.jpg' }
 function mimeFor(name: string) {
   const ext = extension(name).toLowerCase()
-  return ext === '.pdf' ? 'application/pdf' : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : `image/${ext.slice(1)}`
+  if (ext === '.pdf') return 'application/pdf'
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg'
+  if (ext === '.ico') return 'image/x-icon'
+  if (ext === '.svg') return 'image/svg+xml'
+  return `image/${ext.slice(1)}`
 }
 
-const FORMAT_OPTIONS = ['webp', 'jpg', 'png', 'avif'] as const
+const FORMAT_OPTIONS = ['webp', 'jpg', 'png', 'avif', 'ico', 'svg'] as const
 const DPI_OPTIONS = [72, 150, 300, 600] as const
 type WorkspaceSettings = {
   format: string
@@ -33,6 +37,35 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   recursive: true,
   preserveMetadata: false,
   lossless: false,
+}
+
+/**
+ * Return a deliberately conservative client-side estimate for a compressed
+ * image. The real encoder remains the source of truth; this helper only uses
+ * the input byte count and current options so no image data crosses IPC.
+ */
+export function estimateCompressedSize(originalBytes: number, quality = 76, targetBytes = 0, lossless = false, mimeType = ''): number {
+  const original = Number.isFinite(originalBytes) ? Math.max(0, Math.round(originalBytes)) : 0
+  if (original === 0) return 0
+
+  const target = Number.isFinite(targetBytes) ? Math.max(0, Math.round(targetBytes)) : 0
+  const normalizedQuality = Number.isFinite(quality) ? Math.min(100, Math.max(10, quality)) : 76
+
+  // PNG and the explicit lossless mode do not respond to a quality slider.
+  // A small reduction is typical after metadata removal, but the result can
+  // still be larger for some images, so never promise more than an estimate.
+  const normalizedMime = mimeType.toLowerCase()
+  if (lossless || normalizedMime === 'image/png' || normalizedMime === 'image/x-icon' || normalizedMime === 'image/vnd.microsoft.icon' || normalizedMime === 'image/svg+xml') {
+    return Math.max(1, Math.round(original * 0.92))
+  }
+
+  // A linear approximation is easier to understand and remains monotonic as
+  // the user moves the quality slider. The output is marked as approximate in
+  // the UI because image content can move the actual size substantially.
+  const qualityRatio = 0.25 + (normalizedQuality / 100) * 0.75
+  const qualityEstimate = Math.max(1, Math.round(original * qualityRatio))
+  if (target > 0) return Math.max(1, Math.min(qualityEstimate, target))
+  return qualityEstimate
 }
 
 function readStorage(key: string): string | null {
@@ -90,6 +123,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const completeCount = computed(() => files.value.filter(item => item.status === 'done').length)
   const progress = computed(() => files.value.length ? Math.round(files.value.reduce((sum, item) => sum + item.progress, 0) / files.value.length) : 0)
+  const estimatedTotalSize = computed(() => activeTool.value === 'compress'
+    ? files.value.reduce((sum, item) => sum + estimateCompressedSize(item.size, settings.value.quality, settings.value.targetBytes, settings.value.lossless, item.type), 0)
+    : 0)
   const isEligible = (item: QueueFile) => settings.value.recursive || !item.relativePath
   const canProcess = computed(() => {
     return !running.value && files.value.some(item => isEligible(item) && (item.status === 'queued' || item.status === 'error'))
@@ -105,7 +141,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function acceptsBrowser(file: File) {
     const ext = file.name.match(/\.[^/.]+$/)?.[0].toLowerCase()
     if (activeTool.value === 'pdf') return file.type === 'application/pdf' || ext === '.pdf'
-    const supportedExtension = ['.png', '.jpg', '.jpeg', '.webp', '.avif'].includes(ext ?? '')
+    const supportedExtension = ['.png', '.jpg', '.jpeg', '.webp', '.avif', '.ico', '.svg'].includes(ext ?? '')
     return supportedExtension && (!file.type || file.type.startsWith('image/'))
   }
 
@@ -221,6 +257,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function clearFiles() { if (running.value) return; files.value.forEach(releasePreview); files.value = [] }
   function retry(fileId: string) { const item = files.value.find(entry => entry.id === fileId); if (item) { releaseResultPreview(item); item.status = 'queued'; item.progress = 0; item.error = undefined; item.warning = undefined; item.resultName = undefined; item.resultNames = undefined; item.resultPreviewUrl = undefined } }
   function setOutputDir(dir: string) { outputDir.value = dir }
+  function estimateForFile(item: QueueFile) {
+    return estimateCompressedSize(item.size, settings.value.quality, settings.value.targetBytes, settings.value.lossless, item.type)
+  }
 
   function nativeRequest(source = files.value.filter(item => item.status === 'queued' || item.status === 'error')): JobRequest {
     return {
@@ -322,5 +361,5 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function simulateProgress(item: QueueFile) { for (const value of [20, 45, 70, 90]) { await new Promise(resolve => setTimeout(resolve, 100)); if (cancelRequested.value) return false; item.progress = value } return true }
 
-  return { activeTool, files, outputDir, running, settings, completeCount, progress, canProcess, setTool, addFiles, addNativeFiles, addNativePaths, browseFiles, browseFolder, chooseOutput, loadDefaultOutputDirectory, openOutputDirectory, removeFile, clearFiles, process, cancel, retry, setOutputDir }
+  return { activeTool, files, outputDir, running, settings, completeCount, progress, estimatedTotalSize, canProcess, setTool, addFiles, addNativeFiles, addNativePaths, browseFiles, browseFolder, chooseOutput, loadDefaultOutputDirectory, openOutputDirectory, removeFile, clearFiles, process, cancel, retry, setOutputDir, estimateForFile }
 })

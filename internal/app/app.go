@@ -252,7 +252,7 @@ func (a *App) OpenInputFiles() ([]InputFile, error) {
 	}
 	paths, err := wailsruntime.OpenMultipleFilesDialog(ctx, wailsruntime.OpenDialogOptions{
 		Title:   "Select files",
-		Filters: []wailsruntime.FileFilter{{DisplayName: "Supported files", Pattern: "*.png;*.jpg;*.jpeg;*.webp;*.avif;*.pdf"}},
+		Filters: []wailsruntime.FileFilter{{DisplayName: "Supported files", Pattern: "*.png;*.jpg;*.jpeg;*.webp;*.avif;*.ico;*.svg;*.pdf"}},
 	})
 	if err != nil {
 		return nil, err

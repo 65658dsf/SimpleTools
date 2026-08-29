@@ -19,6 +19,14 @@ func TestUniqueName(t *testing.T) {
 	}
 }
 
+func TestIsImagePathIncludesICOAndSVG(t *testing.T) {
+	for _, path := range []string{"icon.ico", "illustration.svg", "ICON.ICO", "ART.SVG"} {
+		if !IsImagePath(path) {
+			t.Fatalf("IsImagePath(%q) = false", path)
+		}
+	}
+}
+
 func TestAtomicWrite(t *testing.T) {
 	d := t.TempDir()
 	if err := AtomicWrite(d, "result.txt", func(w io.Writer) error { _, e := w.Write([]byte("ok")); return e }); err != nil {

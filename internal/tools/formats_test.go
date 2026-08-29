@@ -18,7 +18,7 @@ func testImage() image.Image {
 }
 
 func TestSupportedCodecRoundTrip(t *testing.T) {
-	for _, format := range []Format{FormatPNG, FormatJPEG, FormatWebP, FormatAVIF} {
+	for _, format := range []Format{FormatPNG, FormatJPEG, FormatWebP, FormatAVIF, FormatICO, FormatSVG} {
 		t.Run(string(format), func(t *testing.T) {
 			data, err := EncodeBytes(testImage(), format, EncodeOptions{Quality: 80})
 			if err != nil {
@@ -32,6 +32,33 @@ func TestSupportedCodecRoundTrip(t *testing.T) {
 				t.Fatalf("decoded size %v", got)
 			}
 		})
+	}
+}
+
+func TestParseFormatIncludesICOAndSVG(t *testing.T) {
+	for input, want := range map[string]Format{"ico": FormatICO, ".ICO": FormatICO, "svg": FormatSVG, ".SVG": FormatSVG} {
+		got, err := ParseFormat(input)
+		if err != nil {
+			t.Fatalf("ParseFormat(%q): %v", input, err)
+		}
+		if got != want {
+			t.Fatalf("ParseFormat(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestICOEncoderCapsLargeImages(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 300, 150))
+	data, err := EncodeBytes(img, FormatICO, EncodeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := Decode(bytes.NewReader(data), ".ico")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := decoded.Bounds().Size(); got != (image.Point{X: 256, Y: 128}) {
+		t.Fatalf("decoded size %v, want 256x128", got)
 	}
 }
 

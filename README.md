@@ -6,7 +6,8 @@ The source repository is intended to live at <https://github.com/65658dsf/Simple
 
 Current tools:
 
-- Convert PNG, JPEG, WebP, and AVIF images.
+- Convert PNG, JPEG, WebP, AVIF, ICO, and SVG images. SVG output is a self-contained raster
+  wrapper and ICO output is a PNG-backed icon (up to 256 pixels).
 - Compress supported images with quality or target-size controls.
 - Render PDF pages to PNG at selectable DPI values.
 

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { useWorkspaceStore } from './stores/workspace'
+import { estimateCompressedSize, useWorkspaceStore } from './stores/workspace'
 
 function imageFile(name: string) {
   return new File(['fixture'], name, { type: 'image/png' })
@@ -50,3 +50,19 @@ describe('workspace queue behavior', () => {
   })
 })
 
+describe('compression size estimate', () => {
+  it('responds monotonically to quality and respects a target size', () => {
+    const original = 100_000
+    const lowQuality = estimateCompressedSize(original, 25)
+    const highQuality = estimateCompressedSize(original, 90)
+
+    expect(lowQuality).toBeLessThan(highQuality)
+    expect(estimateCompressedSize(original, 76, 20_000)).toBe(20_000)
+  })
+
+  it('uses a stable metadata-removal estimate for lossless inputs', () => {
+    expect(estimateCompressedSize(100_000, 10, 1_000, true)).toBe(92_000)
+    expect(estimateCompressedSize(100_000, 10, 1_000, false, 'image/png')).toBe(92_000)
+    expect(estimateCompressedSize(100_000, 10, 1_000, false, 'image/svg+xml')).toBe(92_000)
+  })
+})

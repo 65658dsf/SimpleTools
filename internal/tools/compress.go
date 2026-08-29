@@ -14,7 +14,8 @@ type CompressionResult struct {
 }
 
 // CompressImage encodes an image once, or performs a bounded binary search for
-// the requested target size. PNG is intentionally kept lossless.
+// the requested target size. PNG, ICO, and SVG are intentionally kept
+// lossless because their encoders do not expose a useful quality control.
 func CompressImage(img image.Image, format Format, quality int, targetBytes int64, lossless bool) (CompressionResult, error) {
 	if quality < 1 {
 		quality = 85
@@ -22,7 +23,7 @@ func CompressImage(img image.Image, format Format, quality int, targetBytes int6
 	if quality > 100 {
 		quality = 100
 	}
-	if targetBytes <= 0 || format == FormatPNG || lossless {
+	if targetBytes <= 0 || format == FormatPNG || format == FormatICO || format == FormatSVG || lossless {
 		data, err := EncodeBytes(img, format, EncodeOptions{Quality: quality, Lossless: lossless})
 		result := CompressionResult{Data: data, Quality: quality, Compressed: int64(len(data))}
 		if err == nil && targetBytes > 0 && float64(len(data)) > float64(targetBytes)*1.05 {

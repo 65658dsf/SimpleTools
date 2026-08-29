@@ -19,7 +19,7 @@ Run the smallest affected checks first, then the full set before a release:
 ## Behavior coverage
 
 Backend tests must cover option validation, path containment, recursive folder expansion,
-collision-safe names, atomic cleanup, cancellation, partial failure, page range parsing, all four
+collision-safe names, atomic cleanup, cancellation, partial failure, page range parsing, all six
 image formats, alpha handling, EXIF orientation, target-size warnings, and PDF DPI/page selection.
 
 Frontend tests must cover navigation, empty/queued/processing/success/error/cancelled states,
