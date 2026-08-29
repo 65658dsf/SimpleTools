@@ -4,7 +4,7 @@
 
 SimpleTools is a local-first Wails desktop application for Windows 10/11 x64 and macOS 12+
 (Intel and Apple Silicon). The current release contains image conversion, image compression,
-and PDF-to-PNG export.
+text watermarking, text-to-QR generation, and PDF-to-PNG export.
 
 ## Setup
 

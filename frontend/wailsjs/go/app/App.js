@@ -46,8 +46,16 @@ export function PreviewImage(arg1, arg2) {
   return window['go']['app']['App']['PreviewImage'](arg1, arg2);
 }
 
+export function PreviewQRCode(arg1, arg2) {
+  return window['go']['app']['App']['PreviewQRCode'](arg1, arg2);
+}
+
 export function PreviewWatermark(arg1, arg2, arg3) {
   return window['go']['app']['App']['PreviewWatermark'](arg1, arg2, arg3);
+}
+
+export function SaveQRCode(arg1, arg2, arg3) {
+  return window['go']['app']['App']['SaveQRCode'](arg1, arg2, arg3);
 }
 
 export function StartJob(arg1) {

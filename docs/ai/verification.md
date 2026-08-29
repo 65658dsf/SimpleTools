@@ -21,12 +21,17 @@ Run the smallest affected checks first, then the full set before a release:
 Backend tests must cover option validation, path containment, recursive folder expansion,
 collision-safe names, atomic cleanup, cancellation, partial failure, page range parsing, all six
 image formats, alpha handling, EXIF orientation, target-size warnings, and PDF DPI/page selection.
+QR code coverage must include UTF-8 and option validation, all four error-correction levels,
+capacity failures, exact PNG size and colors, bounded preview payloads, safe/default output names,
+collision suffixes, and decoding atomically saved output.
 
 Frontend tests must cover navigation, empty/queued/processing/success/error/cancelled states,
 form validation, progress events, retry, locale switching, theme persistence, and compression
 preview updates. Watermark coverage must include option validation, CJK text rendering, anchor and
 tiled placement, preset selection, stale-preview suppression, and keyboard operation of the
-before/after comparison slider.
+before/after comparison slider. QR code coverage must include navigation, persisted settings,
+text/byte validation, size and error-correction controls, custom colors, live preview updates,
+save state, and browser/native adapter behavior.
 
 Fixtures should include a transparent image, an EXIF-rotated JPEG, one fixture for each supported
 codec, a corrupt file, a three-page PDF containing CJK text that relies on a non-embedded font,
@@ -49,8 +54,9 @@ SmartScreen or macOS Gatekeeper warnings. The update manifest and downloadable a
 protected by Ed25519 signatures and SHA-256 checksums.
 
 Each packaged smoke test launches the app, opens a native dialog, processes one image and one PDF,
-verifies output files, cancels a batch, and checks the update prompt when a signed fixture manifest
-is available. Windows also checks missing-WebView2 bootstrap behavior.
+generates and saves one QR code, verifies output files, cancels a batch, and checks the update
+prompt when a signed fixture manifest is available. Windows also checks missing-WebView2 bootstrap
+behavior.
 
 ## Release evidence
 

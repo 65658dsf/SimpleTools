@@ -407,6 +407,114 @@ func TestWatermarkPreviewPNGShrinksToPayloadLimit(t *testing.T) {
 	}
 }
 
+func TestPreviewQRCodeReturnsBoundedPNGWithRequestedColors(t *testing.T) {
+	preview, err := New().PreviewQRCode(tools.QRCodeOptions{
+		Text:            "SimpleTools 二维码预览",
+		Size:            512,
+		ErrorCorrection: "quartile",
+		Foreground:      "#102A43",
+		Background:      "#F5F7FA",
+	}, 240)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Size != 240 {
+		t.Fatalf("preview size = %d, want 240", preview.Size)
+	}
+	if !strings.HasPrefix(preview.DataURL, "data:image/png;base64,") {
+		t.Fatalf("unexpected data URL prefix: %.32q", preview.DataURL)
+	}
+	const maxDataURLLength = 1024*1024 + 64
+	if len(preview.DataURL) > maxDataURLLength {
+		t.Fatalf("preview data URL is not bounded: %d", len(preview.DataURL))
+	}
+
+	decoded := decodeImageDataURL(t, preview.DataURL)
+	wantForeground := color.RGBA{R: 0x10, G: 0x2a, B: 0x43, A: 0xff}
+	wantBackground := color.RGBA{R: 0xf5, G: 0xf7, B: 0xfa, A: 0xff}
+	foundForeground, foundBackground := false, false
+	for y := decoded.Bounds().Min.Y; y < decoded.Bounds().Max.Y && (!foundForeground || !foundBackground); y++ {
+		for x := decoded.Bounds().Min.X; x < decoded.Bounds().Max.X; x++ {
+			pixel := color.RGBAModel.Convert(decoded.At(x, y)).(color.RGBA)
+			foundForeground = foundForeground || pixel == wantForeground
+			foundBackground = foundBackground || pixel == wantBackground
+		}
+	}
+	if !foundForeground || !foundBackground {
+		t.Fatalf("preview colors foreground=%v background=%v", foundForeground, foundBackground)
+	}
+}
+
+func TestSaveQRCodeUsesDefaultDirectorySafeNameAndCollisionSuffix(t *testing.T) {
+	temp := t.TempDir()
+	output := filepath.Join(temp, "generated")
+	a := New()
+	a.defaultOutputDir = func() (string, error) { return output, nil }
+	options := tools.QRCodeOptions{
+		Text:            "https://example.test/simple-tools",
+		Size:            256,
+		ErrorCorrection: "medium",
+		Foreground:      "#000000",
+		Background:      "#FFFFFF",
+	}
+
+	first, err := a.SaveQRCode(options, "", `..\reports\Quarter:Report?.PNG`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(output, "Quarter-Report.png"); first != want {
+		t.Fatalf("first output = %q, want %q", first, want)
+	}
+	second, err := a.SaveQRCode(options, "", `..\reports\Quarter:Report?.PNG`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(output, "Quarter-Report-1.png"); second != want {
+		t.Fatalf("collision output = %q, want %q", second, want)
+	}
+	defaultName, err := a.SaveQRCode(options, "", "   ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(output, "qrcode.png"); defaultName != want {
+		t.Fatalf("default output = %q, want %q", defaultName, want)
+	}
+
+	for _, generated := range []string{first, second, defaultName} {
+		file, err := os.Open(generated)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, decodeErr := png.Decode(file)
+		closeErr := file.Close()
+		if decodeErr != nil {
+			t.Fatalf("decode %q: %v", generated, decodeErr)
+		}
+		if closeErr != nil {
+			t.Fatal(closeErr)
+		}
+		if got := decoded.Bounds().Size(); got.X != options.Size || got.Y != options.Size {
+			t.Fatalf("saved QR size = %v, want %dx%d", got, options.Size, options.Size)
+		}
+	}
+}
+
+func TestSanitizeQRCodeOutputBaseHandlesUnsafeAndReservedNames(t *testing.T) {
+	tests := map[string]string{
+		"":                        "qrcode",
+		"../../.png":              "qrcode",
+		`folder\safe-name.png`:    "safe-name",
+		"  quarterly:report?.PNG": "quarterly-report",
+		"CON.png":                 "_CON",
+		"LPT9.notes":              "_LPT9.notes",
+	}
+	for input, want := range tests {
+		if got := sanitizeQRCodeOutputBase(input); got != want {
+			t.Errorf("sanitizeQRCodeOutputBase(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func decodeImageDataURL(t *testing.T, value string) image.Image {
 	t.Helper()
 	header, payload, ok := strings.Cut(value, ",")

@@ -6,8 +6,10 @@ require (
 	github.com/gen2brain/avif v0.6.0
 	github.com/gen2brain/go-fitz v1.28.2
 	github.com/gen2brain/webp v0.6.4
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/wailsapp/wails/v2 v2.15.0
 	golang.org/x/image v0.41.0
+	golang.org/x/sys v0.46.0
 )
 
 require (
@@ -39,6 +41,5 @@ require (
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 )

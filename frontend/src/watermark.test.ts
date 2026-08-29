@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { applyWatermarkPreset, comparisonSplitAfterKey, createLatestTaskScheduler, DEFAULT_WATERMARK, matchingWatermarkPreset, normalizeWatermarkOptions, WATERMARK_PRESETS } from './watermark'
+import { createLatestTaskScheduler } from './latest-task'
+import { applyWatermarkPreset, comparisonSplitAfterKey, DEFAULT_WATERMARK, matchingWatermarkPreset, normalizeWatermarkOptions, WATERMARK_PRESETS } from './watermark'
 
 function deferred<T>() {
   let resolve!: (value: T) => void

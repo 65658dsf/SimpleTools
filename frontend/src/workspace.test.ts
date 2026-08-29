@@ -1,6 +1,19 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { nextTick } from 'vue'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { DEFAULT_QR_CODE } from './qrcode'
 import { estimateCompressedSize, targetBytesToValue, targetUnitForBytes, targetValueToBytes, useWorkspaceStore } from './stores/workspace'
+
+class MemoryStorage implements Storage {
+  private readonly values = new Map<string, string>()
+
+  get length() { return this.values.size }
+  clear() { this.values.clear() }
+  getItem(key: string) { return this.values.get(key) ?? null }
+  key(index: number) { return [...this.values.keys()][index] ?? null }
+  removeItem(key: string) { this.values.delete(key) }
+  setItem(key: string, value: string) { this.values.set(key, value) }
+}
 
 function imageFile(name: string) {
   return new File(['fixture'], name, { type: 'image/png' })
@@ -96,6 +109,71 @@ describe('compression size estimate', () => {
     expect(estimateCompressedSize(100_000, 10, 1_000, true)).toBe(92_000)
     expect(estimateCompressedSize(100_000, 10, 1_000, false, 'image/png')).toBe(92_000)
     expect(estimateCompressedSize(100_000, 10, 1_000, false, 'image/svg+xml')).toBe(92_000)
+  })
+})
+
+describe('QR code settings', () => {
+  let storage: MemoryStorage
+
+  beforeEach(() => {
+    storage = new MemoryStorage()
+    vi.stubGlobal('localStorage', storage)
+    setActivePinia(createPinia())
+  })
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('persists nested settings and restores them in a new store', async () => {
+    const expected = {
+      text: 'https://simpletools.example/qr',
+      size: 1024,
+      errorCorrection: 'high' as const,
+      foreground: '#123456',
+      background: '#fedcba',
+      fileName: 'simpletools-link',
+    }
+    const first = useWorkspaceStore()
+    Object.assign(first.settings.qrCode, expected)
+
+    await nextTick()
+
+    const saved = JSON.parse(storage.getItem('simpletools-settings') ?? '{}')
+    expect(saved.qrCode).toEqual(expected)
+
+    setActivePinia(createPinia())
+    expect(useWorkspaceStore().settings.qrCode).toEqual(expected)
+  })
+
+  it('normalizes persisted QR code settings through the workspace store', () => {
+    storage.setItem('simpletools-settings', JSON.stringify({
+      qrCode: {
+        text: 'saved content',
+        size: 999,
+        errorCorrection: 'maximum',
+        foreground: 'black',
+        background: '#AABBCC',
+        fileName: 'x'.repeat(200),
+      },
+    }))
+
+    expect(useWorkspaceStore().settings.qrCode).toEqual({
+      ...DEFAULT_QR_CODE,
+      text: 'saved content',
+      background: '#aabbcc',
+      fileName: 'x'.repeat(160),
+    })
+  })
+
+  it('does not share nested QR code defaults between store instances', () => {
+    vi.stubGlobal('localStorage', undefined)
+    const first = useWorkspaceStore()
+    first.settings.qrCode.text = 'changed'
+
+    setActivePinia(createPinia())
+    const second = useWorkspaceStore()
+
+    expect(second.settings.qrCode).toEqual(DEFAULT_QR_CODE)
+    expect(second.settings.qrCode).not.toBe(first.settings.qrCode)
   })
 })
 

@@ -26,6 +26,10 @@ export function OpenOutputDirectory(arg1:string):Promise<void>;
 
 export function PreviewImage(arg1:string,arg2:app.PreviewOptions):Promise<app.Preview>;
 
+export function PreviewQRCode(arg1:tools.QRCodeOptions,arg2:number):Promise<app.QRCodePreview>;
+
 export function PreviewWatermark(arg1:string,arg2:tools.WatermarkOptions,arg3:number):Promise<app.WatermarkPreview>;
+
+export function SaveQRCode(arg1:tools.QRCodeOptions,arg2:string,arg3:string):Promise<string>;
 
 export function StartJob(arg1:tools.JobRequest):Promise<string>;

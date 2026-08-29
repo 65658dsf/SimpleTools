@@ -8,7 +8,8 @@ import WatermarkComparison from '../components/WatermarkComparison.vue'
 import { wailsService } from '../services/wails'
 import { useWorkspaceStore } from '../stores/workspace'
 import type { QueueFile, WatermarkOptions, WatermarkPosition } from '../types'
-import { applyWatermarkPreset, createLatestTaskScheduler, matchingWatermarkPreset, renderBrowserWatermarkPreview, WATERMARK_PRESETS, type WatermarkPreset } from '../watermark'
+import { createLatestTaskScheduler } from '../latest-task'
+import { applyWatermarkPreset, matchingWatermarkPreset, renderBrowserWatermarkPreview, WATERMARK_PRESETS, type WatermarkPreset } from '../watermark'
 
 const { t } = useI18n()
 const store = useWorkspaceStore()

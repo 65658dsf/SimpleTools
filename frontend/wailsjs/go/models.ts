@@ -138,6 +138,20 @@ export namespace app {
 	        this.maxDimension = source["maxDimension"];
 	    }
 	}
+	export class QRCodePreview {
+	    dataUrl: string;
+	    size: number;
+
+	    static createFrom(source: any = {}) {
+	        return new QRCodePreview(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.dataUrl = source["dataUrl"];
+	        this.size = source["size"];
+	    }
+	}
 	export class WatermarkPreview {
 	    path: string;
 	    width: number;
@@ -328,5 +342,24 @@ export namespace tools {
 		    return a;
 		}
 	}
+	export class QRCodeOptions {
+	    text: string;
+	    size: number;
+	    errorCorrection: string;
+	    foreground: string;
+	    background: string;
 
+	    static createFrom(source: any = {}) {
+	        return new QRCodeOptions(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.text = source["text"];
+	        this.size = source["size"];
+	        this.errorCorrection = source["errorCorrection"];
+	        this.foreground = source["foreground"];
+	        this.background = source["background"];
+	    }
+	}
 }

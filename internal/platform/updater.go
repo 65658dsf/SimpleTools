@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -154,8 +153,8 @@ func (u *GitHubUpdater) DownloadAndInstall(info *UpdateInfo) error {
 	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		return err
 	}
-	// Keep the installer on disk after this method returns. Removing a file
-	// immediately after exec.Start races with the platform installer opening it.
+	// Keep the installer on disk after a successful launch. Removing it
+	// immediately races with the platform installer opening it.
 	// Windows uses the file extension to decide whether a path is an
 	// executable. Keep the installer suffix on the downloaded temporary file;
 	// without it CreateProcess reports "executable file not found in %PATH%".
@@ -189,7 +188,11 @@ func (u *GitHubUpdater) DownloadAndInstall(info *UpdateInfo) error {
 			return err
 		}
 	}
-	return launchInstaller(tmpPath)
+	if err := launchInstaller(tmpPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 func verifySHA256(path, expected string) error {
@@ -219,16 +222,6 @@ func verifySignature(path, encoded string, key ed25519.PublicKey) error {
 		return errors.New("update signature verification failed")
 	}
 	return nil
-}
-
-func launchInstaller(path string) error {
-	if runtime.GOOS == "windows" {
-		return exec.Command(path).Start()
-	}
-	if runtime.GOOS == "darwin" {
-		return exec.Command("open", path).Start()
-	}
-	return fmt.Errorf("unsupported update platform %s", runtime.GOOS)
 }
 
 // updateTempPattern returns a temporary-file pattern with the extension

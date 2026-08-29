@@ -2,6 +2,7 @@ import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import type { JobItem, JobRequest, JobStatus, NativeInputFile, QueueFile, ToolId, WatermarkOptions } from '../types'
 import { wailsService } from '../services/wails'
+import { DEFAULT_QR_CODE, normalizeQRCodeSettings, type QRCodeSettings } from '../qrcode'
 import { DEFAULT_WATERMARK, normalizeWatermarkOptions } from '../watermark'
 
 function id() { return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}` }
@@ -42,6 +43,7 @@ type WorkspaceSettings = {
   preserveMetadata: boolean
   lossless: boolean
   watermark: WatermarkOptions
+  qrCode: QRCodeSettings
 }
 
 const DEFAULT_SETTINGS: WorkspaceSettings = {
@@ -56,10 +58,11 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   preserveMetadata: false,
   lossless: false,
   watermark: { ...DEFAULT_WATERMARK },
+  qrCode: { ...DEFAULT_QR_CODE },
 }
 
 function defaultSettings(): WorkspaceSettings {
-  return { ...DEFAULT_SETTINGS, watermark: { ...DEFAULT_WATERMARK } }
+  return { ...DEFAULT_SETTINGS, watermark: { ...DEFAULT_WATERMARK }, qrCode: { ...DEFAULT_QR_CODE } }
 }
 
 function normalizeTargetUnit(value: unknown, fallback = DEFAULT_SETTINGS.targetBytesUnit): TargetBytesUnit {
@@ -160,6 +163,7 @@ function readSettings(): WorkspaceSettings {
       preserveMetadata: typeof saved.preserveMetadata === 'boolean' ? saved.preserveMetadata : DEFAULT_SETTINGS.preserveMetadata,
       lossless: typeof saved.lossless === 'boolean' ? saved.lossless : DEFAULT_SETTINGS.lossless,
       watermark: normalizeWatermarkOptions(saved.watermark),
+      qrCode: normalizeQRCodeSettings(saved.qrCode),
     }
   } catch {
     return defaultSettings()
@@ -226,7 +230,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   function setTool(tool: ToolId) {
-    if (tool !== 'convert' && tool !== 'compress' && tool !== 'watermark' && tool !== 'pdf') return
+    if (tool !== 'convert' && tool !== 'compress' && tool !== 'watermark' && tool !== 'qrcode' && tool !== 'pdf') return
     activeTool.value = tool
     files.value = files.value.filter(item => activeTool.value === 'pdf' ? item.type === 'application/pdf' : item.type.startsWith('image/'))
     autoSelectTargetUnit()

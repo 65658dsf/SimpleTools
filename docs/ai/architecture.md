@@ -2,10 +2,10 @@
 
 ## Product boundary
 
-SimpleTools is a local-only desktop application. It accepts user-selected paths, processes files
-on the same machine, and writes new files below a user-selected output directory. No account,
-telemetry, cloud storage, or processing API exists in v1. The update checker is isolated as the
-only network-enabled feature.
+SimpleTools is a local-only desktop application. It accepts user-selected paths or entered text,
+processes content on the same machine, and writes new files below a user-selected output
+directory. No account, telemetry, cloud storage, or processing API exists in v1. The update
+checker is isolated as the only network-enabled feature.
 
 ## Components
 
@@ -27,6 +27,10 @@ internal/app
         |
         +--> internal/tools/pdf
         |      - go-fitz / MuPDF page rendering
+        |
+        +--> internal/tools/qrcode
+        |      - text validation and offline PNG generation
+        |      - QR error correction, sizing, and color options
         |
         +--> internal/platform
                - native dialogs and paths
@@ -55,6 +59,10 @@ verification. The frontend does not read arbitrary local files through browser A
 
 Folder jobs mirror the input folder's relative structure below the chosen output directory.
 PDF inputs use a per-document subdirectory and one PNG per selected page.
+
+Text-to-QR generation has no input file or batch lifecycle, so it uses dedicated preview and save
+bindings instead of `StartJob`. Its saved PNG still follows the same validated-directory,
+collision-suffix, and atomic-write rules.
 
 ## Tool contracts
 
@@ -89,6 +97,17 @@ The workspace requests bounded before/after thumbnails from the same Go renderer
 Preview changes are debounced and stale responses are discarded; full image contents do not cross
 the Wails bridge.
 
+### Text to QR code
+
+Text is encoded offline as a PNG QR code using low (L), medium (M), quartile (Q), or high (H)
+error correction. Output size is limited to 128-2048 square pixels, and foreground/background
+colors use opaque `#RRGGBB` values that must differ. Empty text, invalid UTF-8, invalid options,
+content beyond QR capacity, and content that cannot fit the selected pixel size are rejected.
+
+The workspace requests a bounded PNG data URL for live preview. Saving uses `qrcode.png` when no
+name is supplied, removes path components and unsafe filename characters, appends deterministic
+collision suffixes, and atomically writes below the validated or default output directory.
+
 ### PDF to PNG
 
 MuPDF renders pages at 72, 150, 300, or 600 DPI (150 by default). Page expressions use inclusive
@@ -104,6 +123,9 @@ The Wails binding is the only UI/backend boundary:
   same extension and folder expansion rules as the dialogs.
 - `PreviewImage` returns dimensions and a bounded thumbnail data URL only.
 - `PreviewWatermark` returns bounded before/after thumbnails rendered from watermark options.
+- `PreviewQRCode` returns a bounded PNG data URL and rendered square size from QR code options.
+- `SaveQRCode` validates QR code options and atomically writes a collision-safe PNG below the
+  selected or default output directory.
 - `StartJob`, `GetJob`, and `CancelJob` manage asynchronous work.
 - `OpenOutputDirectory` reveals a validated output directory through the host platform.
 - `GetDefaultOutputDirectory` returns the executable-relative fallback output directory.

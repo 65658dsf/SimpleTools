@@ -1,4 +1,4 @@
-export type ToolId = 'convert' | 'compress' | 'watermark' | 'pdf'
+export type ToolId = 'convert' | 'compress' | 'watermark' | 'qrcode' | 'pdf'
 export type QueueStatus = 'queued' | 'processing' | 'done' | 'error' | 'cancelled'
 export type ThemeMode = 'light' | 'dark' | 'system'
 
@@ -25,6 +25,21 @@ export interface WatermarkOptions {
   tile: boolean
   spacing: number
   shadow: boolean
+}
+
+export type QRCodeErrorCorrection = 'low' | 'medium' | 'quartile' | 'high'
+
+export interface QRCodeOptions {
+  text: string
+  size: number
+  errorCorrection: QRCodeErrorCorrection
+  foreground: string
+  background: string
+}
+
+export interface QRCodePreview {
+  dataUrl: string
+  size: number
 }
 
 export interface NativeInputFile {
@@ -126,6 +141,8 @@ export interface WailsService {
   openOutputDirectory(path: string): Promise<void>
   previewImage(path: string, options?: PreviewOptions): Promise<Preview>
   previewWatermark(path: string, watermark: WatermarkOptions, maxDimension?: number): Promise<WatermarkPreview>
+  previewQRCode(options: QRCodeOptions, maxDimension?: number): Promise<QRCodePreview>
+  saveQRCode(options: QRCodeOptions, outputDirectory: string, fileName: string): Promise<string>
   startJob(request: JobRequest): Promise<string>
   getJob(id: string): Promise<JobStatus>
   cancelJob(id: string): Promise<void>
