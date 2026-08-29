@@ -24,7 +24,7 @@ and PDF-to-PNG export.
 - `internal/platform`: filesystem, native dialogs, update transport, and platform-specific code.
 - `frontend/src`: Vue pages, stores, Wails client, translations, and design system styles.
 - `docs/ai`: architecture, verification, and delivery contracts.
-- `.github/workflows`: CI and signed release automation.
+- `.github/workflows`: CI and Ed25519-signed release automation.
 
 Dependency direction is `frontend -> Wails bindings -> internal/app -> internal/tools` and
 `internal/platform`. Tool code must not import Vue, Wails runtime details, or concrete UI state.
@@ -52,8 +52,8 @@ root       wails build
 ```
 
 `wails build` and installer commands are native-platform operations. Windows uses the NSIS
-target; macOS builds Intel and Apple Silicon separately before creating the signed universal
-application bundle. See `docs/ai/verification.md` for the full matrix.
+target; macOS builds Intel and Apple Silicon separately before creating the universal application
+bundle. See `docs/ai/verification.md` for the full matrix.
 
 ## Architecture
 

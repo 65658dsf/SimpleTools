@@ -39,7 +39,12 @@ CI runs the backend/frontend checks on Windows x64 and macOS Intel. Release vali
 runs a native macOS Apple Silicon job. Packaging output must include:
 
 - Windows x64 NSIS installer and portable archive.
-- macOS Intel app, macOS Apple Silicon app, and a merged universal signed/notarized DMG.
+- macOS Intel app, macOS Apple Silicon app, and a merged universal DMG.
+
+Platform signing certificates are intentionally not part of the release workflow. Official
+publication requires the Ed25519 update key pair; unsigned platform packages may trigger Windows
+SmartScreen or macOS Gatekeeper warnings. The update manifest and downloadable assets remain
+protected by Ed25519 signatures and SHA-256 checksums.
 
 Each packaged smoke test launches the app, opens a native dialog, processes one image and one PDF,
 verifies output files, cancels a batch, and checks the update prompt when a signed fixture manifest
@@ -48,4 +53,5 @@ is available. Windows also checks missing-WebView2 bootstrap behavior.
 ## Release evidence
 
 Release notes record the source revision, lockfile state, native build commands, test summaries,
-artifact names, SHA-256 values, signing/notarization status, and any platform-specific gaps.
+artifact names, SHA-256 values, Ed25519 signature status, and any platform-specific gaps such as
+unsigned package warnings.

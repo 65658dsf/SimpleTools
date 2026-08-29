@@ -51,13 +51,13 @@ Backend and frontend verification commands are documented in `docs/ai/verificati
 The manual GitHub Actions workflow in `.github/workflows/release.yml` builds a Windows x64 NSIS
 installer and portable archive, native macOS Intel/Apple Silicon apps, and a merged Universal DMG.
 It copies the application and third-party notices into redistributable archives, records SHA-256
-checksums, and signs update assets with Ed25519 when configured.
+checksums, and signs update assets with Ed25519.
 
-Official publication is intentionally gated on all signing material: an Authenticode PFX, a
-Developer ID P12 and notarization credentials, and an Ed25519 update private key. With any secret
-missing, the workflow only uploads an unsigned test bundle and does not create a GitHub Release.
-Keep the matching base64 public key in `SIMPLETEOOLS_UPDATE_PUBLIC_KEY` for installed clients; the
-private key and certificate passwords must remain CI secrets. See `.env.example` for variable names.
+Official publication requires only the Ed25519 update key pair. Platform signing certificates are
+not used by the release workflow. The resulting Windows and macOS packages are functional, but
+Windows SmartScreen and macOS Gatekeeper may show warnings on first launch. Keep the matching
+base64 public key in `SIMPLETEOOLS_UPDATE_PUBLIC_KEY` for installed clients; the private key must
+remain a CI secret. See `.env.example` for the two required variables.
 
 ## License
 
