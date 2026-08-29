@@ -5,8 +5,8 @@ button, input { font: inherit; }
 button { cursor: pointer; }
 .ui-button { border: 0; cursor: pointer; }
 .ui-button:disabled { cursor: not-allowed; }
-.app-shell { display: flex; min-height: 100vh; }
-.sidebar { width: 244px; flex: 0 0 244px; border-right: 1px solid #e3e7ef; background: #fbfcfe; display: flex; flex-direction: column; padding: 27px 14px 18px; }
+.app-shell { display: flex; height: 100vh; min-height: 100vh; overflow: hidden; }
+.sidebar { align-self: stretch; width: 244px; flex: 0 0 244px; border-right: 1px solid #e3e7ef; background: #fbfcfe; display: flex; flex-direction: column; padding: 27px 14px 18px; overflow-y: auto; }
 .brand, .mobile-brand { display: flex; align-items: center; gap: 10px; font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; font-size: 18px; font-weight: 700; letter-spacing: 0; }
 .brand { padding: 0 13px 34px; }
 .brand-mark { width: 28px; height: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; color: white; background: #ef765a; box-shadow: 0 5px 12px rgba(239,118,90,.22); }
@@ -18,7 +18,7 @@ button { cursor: pointer; }
 .sidebar-bottom { margin-top: auto; display: grid; gap: 17px; }
 .sidebar-note { display: flex; align-items: center; gap: 8px; padding: 0 13px; color: #a0a6b3; font-size: 11px; }
 .status-dot { width: 7px; height: 7px; background: #47bb8d; border-radius: 50%; }
-.main-content { min-width: 0; flex: 1; }
+.main-content { min-width: 0; min-height: 0; height: 100%; flex: 1; overflow-y: auto; }
 .topbar { height: 67px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e5e8ef; padding: 0 42px; background: rgba(251,252,254,.75); }
 .mobile-brand { display: none; font-size: 16px; }
 .topbar-actions { display: flex; align-items: center; gap: 5px; margin-left: auto; }
