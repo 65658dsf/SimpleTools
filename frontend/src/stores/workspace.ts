@@ -17,10 +17,24 @@ function mimeFor(name: string) {
 
 const FORMAT_OPTIONS = ['webp', 'jpg', 'png', 'avif', 'ico', 'svg'] as const
 const DPI_OPTIONS = [72, 150, 300, 600] as const
+export const TARGET_BYTES_UNITS = ['B', 'KB', 'MB', 'GB'] as const
+export type TargetBytesUnit = typeof TARGET_BYTES_UNITS[number]
+
+const BYTES_PER_TARGET_UNIT: Record<TargetBytesUnit, number> = {
+  B: 1,
+  KB: 1024,
+  MB: 1024 * 1024,
+  GB: 1024 * 1024 * 1024,
+}
+
+const MAX_TARGET_BYTES = Number.MAX_SAFE_INTEGER
+
 type WorkspaceSettings = {
   format: string
   quality: number
   targetBytes: number
+  targetBytesUnit: TargetBytesUnit
+  targetBytesUnitAuto: boolean
   dpi: number
   pageRange: string
   recursive: boolean
@@ -32,11 +46,41 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   format: 'webp',
   quality: 76,
   targetBytes: 0,
+  targetBytesUnit: 'KB',
+  targetBytesUnitAuto: true,
   dpi: 150,
   pageRange: '',
   recursive: true,
   preserveMetadata: false,
   lossless: false,
+}
+
+function normalizeTargetUnit(value: unknown, fallback = DEFAULT_SETTINGS.targetBytesUnit): TargetBytesUnit {
+  return typeof value === 'string' && TARGET_BYTES_UNITS.includes(value as TargetBytesUnit)
+    ? value as TargetBytesUnit
+    : fallback
+}
+
+/** Pick a human-friendly binary unit for an input byte count. */
+export function targetUnitForBytes(bytes: number): TargetBytesUnit {
+  const normalized = Number.isFinite(bytes) ? Math.max(0, bytes) : 0
+  if (normalized >= BYTES_PER_TARGET_UNIT.GB) return 'GB'
+  if (normalized >= BYTES_PER_TARGET_UNIT.MB) return 'MB'
+  if (normalized >= BYTES_PER_TARGET_UNIT.KB) return 'KB'
+  return 'B'
+}
+
+export function targetBytesToValue(bytes: number, unit: TargetBytesUnit): number {
+  const normalized = Number.isFinite(bytes) ? Math.max(0, bytes) : 0
+  if (normalized === 0) return 0
+  const value = normalized / BYTES_PER_TARGET_UNIT[unit]
+  return unit === 'B' ? Math.round(value) : Number(value.toFixed(3))
+}
+
+export function targetValueToBytes(value: number, unit: TargetBytesUnit): number {
+  const normalized = Number.isFinite(value) ? Math.max(0, value) : 0
+  if (normalized === 0) return 0
+  return Math.min(MAX_TARGET_BYTES, Math.max(0, Math.round(normalized * BYTES_PER_TARGET_UNIT[unit])))
 }
 
 /**
@@ -94,11 +138,15 @@ function readSettings(): WorkspaceSettings {
     const format = typeof saved.format === 'string' && FORMAT_OPTIONS.includes(saved.format as typeof FORMAT_OPTIONS[number]) ? saved.format : DEFAULT_SETTINGS.format
     const quality = typeof saved.quality === 'number' && Number.isFinite(saved.quality) ? Math.min(100, Math.max(10, Math.round(saved.quality))) : DEFAULT_SETTINGS.quality
     const targetBytes = typeof saved.targetBytes === 'number' && Number.isFinite(saved.targetBytes) ? Math.max(0, Math.round(saved.targetBytes)) : DEFAULT_SETTINGS.targetBytes
+    const targetBytesUnit = normalizeTargetUnit(saved.targetBytesUnit)
+    const targetBytesUnitAuto = typeof saved.targetBytesUnitAuto === 'boolean' ? saved.targetBytesUnitAuto : targetBytes === 0
     const dpi = typeof saved.dpi === 'number' && DPI_OPTIONS.includes(saved.dpi as typeof DPI_OPTIONS[number]) ? saved.dpi : DEFAULT_SETTINGS.dpi
     return {
       format,
       quality,
       targetBytes,
+      targetBytesUnit,
+      targetBytesUnitAuto,
       dpi,
       pageRange: typeof saved.pageRange === 'string' ? saved.pageRange : DEFAULT_SETTINGS.pageRange,
       recursive: typeof saved.recursive === 'boolean' ? saved.recursive : DEFAULT_SETTINGS.recursive,
@@ -123,6 +171,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const completeCount = computed(() => files.value.filter(item => item.status === 'done').length)
   const progress = computed(() => files.value.length ? Math.round(files.value.reduce((sum, item) => sum + item.progress, 0) / files.value.length) : 0)
+  const targetUnit = computed<TargetBytesUnit>({
+    get: () => settings.value.targetBytesUnit,
+    set: value => {
+      const normalized = normalizeTargetUnit(value)
+      settings.value.targetBytesUnit = normalized
+      settings.value.targetBytesUnitAuto = false
+    },
+  })
+  const targetValue = computed<number>({
+    get: () => targetBytesToValue(settings.value.targetBytes, settings.value.targetBytesUnit),
+    set: value => {
+      const numeric = typeof value === 'number' ? value : Number(value)
+      settings.value.targetBytes = targetValueToBytes(numeric, settings.value.targetBytesUnit)
+      settings.value.targetBytesUnitAuto = false
+    },
+  })
   const estimatedTotalSize = computed(() => activeTool.value === 'compress'
     ? files.value.reduce((sum, item) => sum + estimateCompressedSize(item.size, settings.value.quality, settings.value.targetBytes, settings.value.lossless, item.type), 0)
     : 0)
@@ -130,6 +194,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const canProcess = computed(() => {
     return !running.value && files.value.some(item => isEligible(item) && (item.status === 'queued' || item.status === 'error'))
   })
+
+  function autoSelectTargetUnit() {
+    if (!settings.value.targetBytesUnitAuto || activeTool.value !== 'compress') return
+    const largestInput = files.value.reduce((largest, item) => Math.max(largest, item.size), 0)
+    if (largestInput <= 0) return
+    settings.value.targetBytesUnit = targetUnitForBytes(largestInput)
+  }
 
   watch(outputDir, value => writeStorage('simpletools-output', value))
   watch(settings, value => writeStorage('simpletools-settings', JSON.stringify(value)), { deep: true })
@@ -142,13 +213,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const ext = file.name.match(/\.[^/.]+$/)?.[0].toLowerCase()
     if (activeTool.value === 'pdf') return file.type === 'application/pdf' || ext === '.pdf'
     const supportedExtension = ['.png', '.jpg', '.jpeg', '.webp', '.avif', '.ico', '.svg'].includes(ext ?? '')
-    return supportedExtension && (!file.type || file.type.startsWith('image/'))
+    return supportedExtension && (!file.type || file.type.startsWith('image/') || ext === '.ico' || ext === '.svg')
   }
 
   function setTool(tool: ToolId) {
     if (tool !== 'convert' && tool !== 'compress' && tool !== 'pdf') return
     activeTool.value = tool
     files.value = files.value.filter(item => activeTool.value === 'pdf' ? item.type === 'application/pdf' : item.type.startsWith('image/'))
+    autoSelectTargetUnit()
   }
 
   function addNativeFiles(selected: NativeInputFile[]) {
@@ -160,6 +232,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       files.value.push(item)
       void loadPreview(item)
     })
+    autoSelectTargetUnit()
   }
 
   function addFiles(selected: FileList | File[]) {
@@ -169,6 +242,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       files.value.push(item)
       void loadPreview(item)
     })
+    autoSelectTargetUnit()
   }
 
   async function loadPreview(item: QueueFile, target = false) {
@@ -253,8 +327,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (outputDir.value.trim()) await wailsService.openOutputDirectory(outputDir.value)
   }
 
-  function removeFile(fileId: string) { const item = files.value.find(entry => entry.id === fileId); if (!item || item.status === 'processing') return; releasePreview(item); files.value = files.value.filter(entry => entry.id !== fileId) }
-  function clearFiles() { if (running.value) return; files.value.forEach(releasePreview); files.value = [] }
+  function removeFile(fileId: string) { const item = files.value.find(entry => entry.id === fileId); if (!item || item.status === 'processing') return; releasePreview(item); files.value = files.value.filter(entry => entry.id !== fileId); autoSelectTargetUnit() }
+  function clearFiles() { if (running.value) return; files.value.forEach(releasePreview); files.value = []; autoSelectTargetUnit() }
   function retry(fileId: string) { const item = files.value.find(entry => entry.id === fileId); if (item) { releaseResultPreview(item); item.status = 'queued'; item.progress = 0; item.error = undefined; item.warning = undefined; item.resultName = undefined; item.resultNames = undefined; item.resultPreviewUrl = undefined } }
   function setOutputDir(dir: string) { outputDir.value = dir }
   function estimateForFile(item: QueueFile) {
@@ -361,5 +435,5 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function simulateProgress(item: QueueFile) { for (const value of [20, 45, 70, 90]) { await new Promise(resolve => setTimeout(resolve, 100)); if (cancelRequested.value) return false; item.progress = value } return true }
 
-  return { activeTool, files, outputDir, running, settings, completeCount, progress, estimatedTotalSize, canProcess, setTool, addFiles, addNativeFiles, addNativePaths, browseFiles, browseFolder, chooseOutput, loadDefaultOutputDirectory, openOutputDirectory, removeFile, clearFiles, process, cancel, retry, setOutputDir, estimateForFile }
+  return { activeTool, files, outputDir, running, settings, targetValue, targetUnit, targetUnitOptions: TARGET_BYTES_UNITS, completeCount, progress, estimatedTotalSize, canProcess, setTool, addFiles, addNativeFiles, addNativePaths, browseFiles, browseFolder, chooseOutput, loadDefaultOutputDirectory, openOutputDirectory, removeFile, clearFiles, process, cancel, retry, setOutputDir, estimateForFile }
 })

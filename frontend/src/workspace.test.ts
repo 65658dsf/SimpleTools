@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { estimateCompressedSize, useWorkspaceStore } from './stores/workspace'
+import { estimateCompressedSize, targetBytesToValue, targetUnitForBytes, targetValueToBytes, useWorkspaceStore } from './stores/workspace'
 
 function imageFile(name: string) {
   return new File(['fixture'], name, { type: 'image/png' })
@@ -64,5 +64,40 @@ describe('compression size estimate', () => {
     expect(estimateCompressedSize(100_000, 10, 1_000, true)).toBe(92_000)
     expect(estimateCompressedSize(100_000, 10, 1_000, false, 'image/png')).toBe(92_000)
     expect(estimateCompressedSize(100_000, 10, 1_000, false, 'image/svg+xml')).toBe(92_000)
+  })
+})
+
+describe('target size units', () => {
+  it('selects binary units from the original input size', () => {
+    expect(targetUnitForBytes(0)).toBe('B')
+    expect(targetUnitForBytes(1023)).toBe('B')
+    expect(targetUnitForBytes(1024)).toBe('KB')
+    expect(targetUnitForBytes(1024 * 1024)).toBe('MB')
+    expect(targetUnitForBytes(1024 * 1024 * 1024)).toBe('GB')
+  })
+
+  it('converts between the displayed value and backend bytes', () => {
+    expect(targetValueToBytes(1.5, 'MB')).toBe(1.5 * 1024 * 1024)
+    expect(targetBytesToValue(1.5 * 1024 * 1024, 'MB')).toBe(1.5)
+    expect(targetValueToBytes(-1, 'KB')).toBe(0)
+    expect(targetValueToBytes(Number.NaN, 'KB')).toBe(0)
+  })
+
+  it('auto-selects a unit until the user edits the target', () => {
+    const store = useWorkspaceStore()
+    store.setTool('compress')
+    store.addNativeFiles([{ path: 'large.jpg', name: 'large.jpg', size: 3 * 1024 * 1024, kind: 'image' }])
+    expect(store.targetUnit).toBe('MB')
+    expect(store.targetValue).toBe(0)
+
+    store.targetValue = 2
+    expect(store.settings.targetBytes).toBe(2 * 1024 * 1024)
+    store.addNativeFiles([{ path: 'tiny.jpg', name: 'tiny.jpg', size: 512, kind: 'image' }])
+    expect(store.targetUnit).toBe('MB')
+
+    store.targetUnit = 'KB'
+    expect(store.targetUnit).toBe('KB')
+    expect(store.targetValue).toBe(2048)
+    expect(store.settings.targetBytes).toBe(2 * 1024 * 1024)
   })
 })

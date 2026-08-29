@@ -74,7 +74,8 @@ size performs at most eight quality encodes and accepts a result within five per
 PNG, ICO, and SVG are lossless in this pipeline because their encoders do not expose a useful quality
 control; an unattainable target is reported as a warning rather than silently changing format. The
 workspace shows a local, byte-count-based estimate before processing; the encoded output remains the
-source of truth.
+source of truth. Target-size input uses binary B/KB/MB/GB units, selects a readable unit from the
+largest queued source image, and keeps the backend request in canonical bytes.
 
 ### PDF to PNG
 
