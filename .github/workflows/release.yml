@@ -133,7 +133,15 @@ jobs:
           $portable = Join-Path $release 'portable'
           Compress-Archive -Path (Join-Path $portable '*') -DestinationPath (Join-Path $release "SimpleTools-$version-windows-amd64-portable.zip") -CompressionLevel Optimal
           Remove-Item -LiteralPath $portable -Recurse -Force
-          Get-ChildItem -LiteralPath $release -File | Get-FileHash -Algorithm SHA256 | ConvertTo-Json | Out-File -FilePath (Join-Path $release 'windows-sha256.json') -Encoding utf8
+          $hashPath = Join-Path $release 'windows-sha256.json'
+          # Snapshot the inputs before creating the JSON file. PowerShell can
+          # otherwise enumerate the file while the output command still has it locked.
+          $hashInputs = @(Get-ChildItem -LiteralPath $release -File |
+            Where-Object { $_.FullName -ne $hashPath })
+          $hashes = @($hashInputs | Get-FileHash -Algorithm SHA256)
+          $hashTempPath = Join-Path $env:RUNNER_TEMP ("simpletools-windows-sha256-$version.json")
+          $hashes | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $hashTempPath -Encoding utf8
+          Move-Item -LiteralPath $hashTempPath -Destination $hashPath -Force
       - uses: actions/upload-artifact@v4
         with:
           name: simpletools-windows
