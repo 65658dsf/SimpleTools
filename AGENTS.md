@@ -8,6 +8,8 @@ and PDF-to-PNG export.
 
 ## Setup
 
+- Git的提交信息使用中文提交信息
+
 ## Technology and prerequisites
 
 - Go 1.26.x with CGO enabled for the MuPDF binding.

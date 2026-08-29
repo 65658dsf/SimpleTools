@@ -1,7 +1,8 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
-import type { JobItem, JobRequest, JobStatus, NativeInputFile, QueueFile, ToolId } from '../types'
+import type { JobItem, JobRequest, JobStatus, NativeInputFile, QueueFile, ToolId, WatermarkOptions } from '../types'
 import { wailsService } from '../services/wails'
+import { DEFAULT_WATERMARK, normalizeWatermarkOptions } from '../watermark'
 
 function id() { return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}` }
 function stripExtension(name: string) { return name.replace(/\.[^/.]+$/, '') }
@@ -40,6 +41,7 @@ type WorkspaceSettings = {
   recursive: boolean
   preserveMetadata: boolean
   lossless: boolean
+  watermark: WatermarkOptions
 }
 
 const DEFAULT_SETTINGS: WorkspaceSettings = {
@@ -53,6 +55,11 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   recursive: true,
   preserveMetadata: false,
   lossless: false,
+  watermark: { ...DEFAULT_WATERMARK },
+}
+
+function defaultSettings(): WorkspaceSettings {
+  return { ...DEFAULT_SETTINGS, watermark: { ...DEFAULT_WATERMARK } }
 }
 
 function normalizeTargetUnit(value: unknown, fallback = DEFAULT_SETTINGS.targetBytesUnit): TargetBytesUnit {
@@ -132,7 +139,7 @@ function writeStorage(key: string, value: string) {
 
 function readSettings(): WorkspaceSettings {
   const raw = readStorage('simpletools-settings')
-  if (!raw) return { ...DEFAULT_SETTINGS }
+  if (!raw) return defaultSettings()
   try {
     const saved = JSON.parse(raw) as Partial<WorkspaceSettings>
     const format = typeof saved.format === 'string' && FORMAT_OPTIONS.includes(saved.format as typeof FORMAT_OPTIONS[number]) ? saved.format : DEFAULT_SETTINGS.format
@@ -152,9 +159,10 @@ function readSettings(): WorkspaceSettings {
       recursive: typeof saved.recursive === 'boolean' ? saved.recursive : DEFAULT_SETTINGS.recursive,
       preserveMetadata: typeof saved.preserveMetadata === 'boolean' ? saved.preserveMetadata : DEFAULT_SETTINGS.preserveMetadata,
       lossless: typeof saved.lossless === 'boolean' ? saved.lossless : DEFAULT_SETTINGS.lossless,
+      watermark: normalizeWatermarkOptions(saved.watermark),
     }
   } catch {
-    return { ...DEFAULT_SETTINGS }
+    return defaultSettings()
   }
 }
 
@@ -192,7 +200,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     : 0)
   const isEligible = (item: QueueFile) => settings.value.recursive || !item.relativePath
   const canProcess = computed(() => {
-    return !running.value && files.value.some(item => isEligible(item) && (item.status === 'queued' || item.status === 'error'))
+    const hasValidWatermark = activeTool.value !== 'watermark' || Boolean(settings.value.watermark.text.trim())
+    return !running.value && hasValidWatermark && files.value.some(item => isEligible(item) && (item.status === 'queued' || item.status === 'error'))
   })
 
   function autoSelectTargetUnit() {
@@ -217,7 +226,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   function setTool(tool: ToolId) {
-    if (tool !== 'convert' && tool !== 'compress' && tool !== 'pdf') return
+    if (tool !== 'convert' && tool !== 'compress' && tool !== 'watermark' && tool !== 'pdf') return
     activeTool.value = tool
     files.value = files.value.filter(item => activeTool.value === 'pdf' ? item.type === 'application/pdf' : item.type.startsWith('image/'))
     autoSelectTargetUnit()
@@ -347,6 +356,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       lossless: activeTool.value === 'compress' ? settings.value.lossless : undefined,
       dpi: activeTool.value === 'pdf' ? settings.value.dpi : undefined,
       pageRange: activeTool.value === 'pdf' ? settings.value.pageRange : undefined,
+      watermark: activeTool.value === 'watermark' ? { ...settings.value.watermark } : undefined,
       recursive: settings.value.recursive,
       preserveMetadata: settings.value.preserveMetadata,
     }
@@ -354,7 +364,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function process() {
     const processable = files.value.filter(item => isEligible(item) && (item.status === 'queued' || item.status === 'error'))
-    if (!processable.length || running.value) return
+    if (!processable.length || running.value || (activeTool.value === 'watermark' && !settings.value.watermark.text.trim())) return
     running.value = true
     cancelRequested.value = false
     processable.forEach(item => { item.status = 'processing'; item.progress = 0; item.error = undefined })
@@ -391,7 +401,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         item.status = 'cancelled'
         break
       }
-      item.resultName = activeTool.value === 'pdf' ? `${stripExtension(item.name)}-page-001.png` : activeTool.value === 'compress' ? `${stripExtension(item.name)}-compressed${extension(item.name)}` : `${stripExtension(item.name)}.${settings.value.format}`
+      item.resultName = activeTool.value === 'pdf' ? `${stripExtension(item.name)}-page-001.png` : activeTool.value === 'compress' ? `${stripExtension(item.name)}-compressed${extension(item.name)}` : activeTool.value === 'watermark' ? `${stripExtension(item.name)}-watermarked${extension(item.name)}` : `${stripExtension(item.name)}.${settings.value.format}`
       item.progress = 100; item.status = 'done'
     }
     if (cancelRequested.value) processable.filter(item => item.status === 'processing').forEach(item => { item.status = 'cancelled' })

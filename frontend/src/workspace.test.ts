@@ -37,6 +37,38 @@ describe('workspace queue behavior', () => {
     expect(store.files[0].resultName).toBe('photo.webp')
   })
 
+  it('keeps the source extension for a watermarked browser result', async () => {
+    const store = useWorkspaceStore()
+    store.setTool('watermark')
+    store.addFiles([imageFile('photo.png')])
+
+    await store.process()
+
+    expect(store.files[0].status).toBe('done')
+    expect(store.files[0].resultName).toBe('photo-watermarked.png')
+  })
+
+  it('requires non-empty watermark text before processing', async () => {
+    const store = useWorkspaceStore()
+    store.setTool('watermark')
+    store.addFiles([imageFile('photo.png')])
+    expect(store.canProcess).toBe(true)
+
+    store.settings.watermark.text = '   '
+    expect(store.canProcess).toBe(false)
+    await store.process()
+    expect(store.files[0].status).toBe('queued')
+  })
+
+  it('does not share nested watermark defaults between store instances', () => {
+    const first = useWorkspaceStore()
+    first.settings.watermark.text = 'changed'
+    setActivePinia(createPinia())
+
+    const second = useWorkspaceStore()
+    expect(second.settings.watermark.text).toBe('SimpleTools')
+  })
+
   it('marks in-flight browser work as cancelled', async () => {
     const store = useWorkspaceStore()
     store.addFiles([imageFile('one.png'), imageFile('two.png')])

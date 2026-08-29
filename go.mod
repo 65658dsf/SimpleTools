@@ -7,6 +7,7 @@ require (
 	github.com/gen2brain/go-fitz v1.28.2
 	github.com/gen2brain/webp v0.6.4
 	github.com/wailsapp/wails/v2 v2.15.0
+	golang.org/x/image v0.41.0
 )
 
 require (

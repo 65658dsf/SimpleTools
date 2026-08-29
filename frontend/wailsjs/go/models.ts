@@ -138,6 +138,28 @@ export namespace app {
 	        this.maxDimension = source["maxDimension"];
 	    }
 	}
+	export class WatermarkPreview {
+	    path: string;
+	    width: number;
+	    height: number;
+	    beforeDataUrl?: string;
+	    afterDataUrl?: string;
+	    truncated?: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new WatermarkPreview(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.width = source["width"];
+	        this.height = source["height"];
+	        this.beforeDataUrl = source["beforeDataUrl"];
+	        this.afterDataUrl = source["afterDataUrl"];
+	        this.truncated = source["truncated"];
+	    }
+	}
 
 }
 
@@ -218,6 +240,38 @@ export namespace platform {
 
 export namespace tools {
 	
+	export class WatermarkOptions {
+	    text: string;
+	    fontFamily?: string;
+	    fontSize?: number;
+	    color?: string;
+	    opacity?: number;
+	    position?: string;
+	    margin?: number;
+	    rotation?: number;
+	    tile?: boolean;
+	    spacing?: number;
+	    shadow?: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new WatermarkOptions(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.text = source["text"];
+	        this.fontFamily = source["fontFamily"];
+	        this.fontSize = source["fontSize"];
+	        this.color = source["color"];
+	        this.opacity = source["opacity"];
+	        this.position = source["position"];
+	        this.margin = source["margin"];
+	        this.rotation = source["rotation"];
+	        this.tile = source["tile"];
+	        this.spacing = source["spacing"];
+	        this.shadow = source["shadow"];
+	    }
+	}
 	export class JobRequest {
 	    tool: string;
 	    inputs: string[];
@@ -232,6 +286,7 @@ export namespace tools {
 	    dpi?: number;
 	    pageRange?: string;
 	    maxPixels?: number;
+	    watermark?: WatermarkOptions;
 	
 	    static createFrom(source: any = {}) {
 	        return new JobRequest(source);
@@ -252,8 +307,26 @@ export namespace tools {
 	        this.dpi = source["dpi"];
 	        this.pageRange = source["pageRange"];
 	        this.maxPixels = source["maxPixels"];
+	        this.watermark = this.convertValues(source["watermark"], WatermarkOptions);
 	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }
-

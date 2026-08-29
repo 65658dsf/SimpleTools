@@ -10,9 +10,10 @@ import (
 type Tool string
 
 const (
-	ToolConvert  Tool = "convert"
-	ToolCompress Tool = "compress"
-	ToolPDF      Tool = "pdf"
+	ToolConvert   Tool = "convert"
+	ToolCompress  Tool = "compress"
+	ToolPDF       Tool = "pdf"
+	ToolWatermark Tool = "watermark"
 )
 
 type JobRequest struct {
@@ -32,6 +33,7 @@ type JobRequest struct {
 	DPI               int               `json:"dpi,omitempty"`
 	PageRange         string            `json:"pageRange,omitempty"`
 	MaxPixels         int64             `json:"maxPixels,omitempty"`
+	Watermark         *WatermarkOptions `json:"watermark,omitempty"`
 }
 
 func (r JobRequest) normalizedTool() (Tool, error) {
@@ -40,7 +42,7 @@ func (r JobRequest) normalizedTool() (Tool, error) {
 		tool = ToolConvert
 	}
 	switch tool {
-	case ToolConvert, ToolCompress, ToolPDF:
+	case ToolConvert, ToolCompress, ToolPDF, ToolWatermark:
 		return tool, nil
 	default:
 		return "", fmt.Errorf("unsupported tool %q", tool)
@@ -98,6 +100,18 @@ func (r JobRequest) Validate() (Format, error) {
 			return "", fmt.Errorf("quality must be between 1 and 100")
 		}
 		return format, nil
+	}
+	if tool == ToolWatermark {
+		if r.Watermark == nil {
+			return "", fmt.Errorf("watermark options are required")
+		}
+		if _, err := r.Watermark.normalized(); err != nil {
+			return "", err
+		}
+		if r.TargetBytes != 0 {
+			return "", fmt.Errorf("target size is not supported for watermark output")
+		}
+		return "", nil
 	}
 	if r.Quality != 0 && (r.Quality < 1 || r.Quality > 100) {
 		return "", fmt.Errorf("quality must be between 1 and 100")

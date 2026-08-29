@@ -1,6 +1,31 @@
-export type ToolId = 'convert' | 'compress' | 'pdf'
+export type ToolId = 'convert' | 'compress' | 'watermark' | 'pdf'
 export type QueueStatus = 'queued' | 'processing' | 'done' | 'error' | 'cancelled'
 export type ThemeMode = 'light' | 'dark' | 'system'
+
+export type WatermarkPosition =
+  | 'top-left'
+  | 'top-center'
+  | 'top-right'
+  | 'center-left'
+  | 'center'
+  | 'center-right'
+  | 'bottom-left'
+  | 'bottom-center'
+  | 'bottom-right'
+
+export interface WatermarkOptions {
+  text: string
+  fontFamily: string
+  fontSize: number
+  color: string
+  opacity: number
+  position: WatermarkPosition
+  margin: number
+  rotation: number
+  tile: boolean
+  spacing: number
+  shadow: boolean
+}
 
 export interface NativeInputFile {
   path: string
@@ -41,6 +66,7 @@ export interface JobRequest {
   recursive?: boolean
   dpi?: number
   pageRange?: string
+  watermark?: WatermarkOptions
 }
 
 export interface JobItem {
@@ -82,6 +108,15 @@ export interface Preview {
   truncated?: boolean
 }
 
+export interface WatermarkPreview {
+  path: string
+  width: number
+  height: number
+  beforeDataUrl: string
+  afterDataUrl: string
+  truncated?: boolean
+}
+
 export interface WailsService {
   openInputFiles(): Promise<NativeInputFile[]>
   openInputFilesFromPaths(paths: string[]): Promise<NativeInputFile[]>
@@ -90,6 +125,7 @@ export interface WailsService {
   getDefaultOutputDirectory(): Promise<string>
   openOutputDirectory(path: string): Promise<void>
   previewImage(path: string, options?: PreviewOptions): Promise<Preview>
+  previewWatermark(path: string, watermark: WatermarkOptions, maxDimension?: number): Promise<WatermarkPreview>
   startJob(request: JobRequest): Promise<string>
   getJob(id: string): Promise<JobStatus>
   cancelJob(id: string): Promise<void>

@@ -10,9 +10,10 @@ dependencies remain available in the corresponding source checkout and lockfiles
 | Component | Version | License | Source and license text | Use |
 | --- | --- | --- | --- | --- |
 | Wails | v2.15.0 | MIT | <https://github.com/wailsapp/wails/tree/v2.15.0>; `LICENSE` in the Wails source | Desktop shell and Go/JS bindings |
+| golang.org/x/image | v0.41.0 | BSD-3-Clause | <https://cs.opensource.google/go/x/image/+/v0.41.0>; `LICENSE` in the module source | Font parsing, text drawing, and preview scaling |
 | go-fitz | v1.28.2 | AGPL-3.0-or-later | <https://github.com/gen2brain/go-fitz/tree/v1.28.2>; `COPYING` in the source | Go binding used for PDF rendering |
 | MuPDF | bundled by go-fitz v1.28.2 | AGPL-3.0-or-later or commercial | <https://mupdf.com>; license and source offer in the go-fitz/MuPDF source distribution | PDF rasterization in `mupdf` builds |
-| Noto Sans SC | 2.004-H2 subset (from `@fontsource/noto-sans-sc` v5.1.1) | OFL-1.1 | `internal/tools/assets/OFL-1.1.txt`; `internal/tools/assets/README.md`; <https://github.com/notofonts/noto-cjk> | Embedded Simplified Chinese fallback font for MuPDF CJK font requests |
+| Noto Sans SC | 2.004-H2 subset (from `@fontsource/noto-sans-sc` v5.1.1) | OFL-1.1 | `internal/tools/assets/OFL-1.1.txt`; `internal/tools/assets/README.md`; <https://github.com/notofonts/noto-cjk> | Embedded Simplified Chinese font for MuPDF fallback and text watermarks |
 | gen2brain/webp | v0.6.4 | MIT | <https://github.com/gen2brain/webp/tree/v0.6.4>; `LICENSE` in the source | WebP Go binding |
 | libwebp | bundled by gen2brain/webp v0.6.4 | BSD-3-Clause | <https://chromium.googlesource.com/webm/libwebp/>; `lib/LICENSE.libwebp` in the source | WebP codec |
 | gen2brain/avif | v0.6.0 | MIT | <https://github.com/gen2brain/avif/tree/v0.6.0>; `LICENSE` in the source | AVIF Go binding |

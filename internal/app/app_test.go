@@ -1,7 +1,9 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"image"
 	"image/color"
 	"image/png"
@@ -190,6 +192,250 @@ func TestStartJobKeepsExistingOutputAndReportsPartialFailure(t *testing.T) {
 	if len(status.Outputs) != 1 || !strings.HasSuffix(status.Outputs[0], "good-1.jpg") {
 		t.Fatalf("expected collision-safe output, got %#v", status.Outputs)
 	}
+}
+
+func TestWatermarkJobPreservesFormatAndUsesCollisionSafeName(t *testing.T) {
+	d := t.TempDir()
+	out := filepath.Join(d, "out")
+	if err := os.Mkdir(out, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	in := filepath.Join(d, "photo.png")
+	source := image.NewNRGBA(image.Rect(0, 0, 360, 220))
+	for y := 0; y < source.Bounds().Dy(); y++ {
+		for x := 0; x < source.Bounds().Dx(); x++ {
+			source.SetNRGBA(x, y, color.NRGBA{R: 25, G: 45, B: 65, A: 255})
+		}
+	}
+	f, err := os.Create(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, source); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	existing := filepath.Join(out, "photo-watermarked.png")
+	if err := os.WriteFile(existing, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := New()
+	id, err := a.StartJob(tools.JobRequest{
+		Tool:            tools.ToolWatermark,
+		Inputs:          []string{in},
+		OutputDirectory: out,
+		Watermark: &tools.WatermarkOptions{
+			Text: "SimpleTools 水印", FontFamily: "noto-sans-sc", FontSize: 42,
+			Color: "#ffffff", Opacity: 0.8, Position: "bottom-right", Margin: 12, Shadow: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := waitForTerminalJob(t, a, id)
+	if status.State != "completed" || len(status.Outputs) != 1 {
+		t.Fatalf("unexpected status %#v", status)
+	}
+	if got := filepath.Base(status.Outputs[0]); got != "photo-watermarked-1.png" {
+		t.Fatalf("output name = %q", got)
+	}
+	if kept, err := os.ReadFile(existing); err != nil || string(kept) != "keep me" {
+		t.Fatalf("existing output changed: %q, %v", kept, err)
+	}
+	generated, err := os.Open(status.Outputs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := png.Decode(generated)
+	_ = generated.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Bounds() != source.Bounds() {
+		t.Fatalf("output bounds = %v, want %v", decoded.Bounds(), source.Bounds())
+	}
+	if imagesEqual(decoded, source) {
+		t.Fatal("watermarked output is identical to its source")
+	}
+}
+
+func TestWatermarkJobRequiresOptions(t *testing.T) {
+	d := t.TempDir()
+	in := filepath.Join(d, "input.png")
+	f, err := os.Create(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, image.NewNRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	if _, err := New().StartJob(tools.JobRequest{Tool: tools.ToolWatermark, Inputs: []string{in}, OutputDirectory: d}); err == nil || !strings.Contains(err.Error(), "watermark options") {
+		t.Fatalf("expected missing watermark options error, got %v", err)
+	}
+}
+
+func TestPreviewWatermarkReturnsBoundedComparison(t *testing.T) {
+	d := t.TempDir()
+	in := filepath.Join(d, "preview.png")
+	source := image.NewNRGBA(image.Rect(0, 0, 900, 540))
+	for y := 0; y < source.Bounds().Dy(); y++ {
+		for x := 0; x < source.Bounds().Dx(); x++ {
+			source.SetNRGBA(x, y, color.NRGBA{R: uint8(x), G: uint8(y), B: uint8(x + y), A: 255})
+		}
+	}
+	f, err := os.Create(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, source); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	preview, err := New().PreviewWatermark(in, tools.WatermarkOptions{
+		Text: "预览", FontFamily: "noto-sans-sc", FontSize: 96, Color: "#ffffff",
+		Opacity: 0.8, Position: "center", Rotation: -20, Shadow: true,
+	}, 320)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Path != in || preview.Width != 900 || preview.Height != 540 || preview.Truncated {
+		t.Fatalf("unexpected preview metadata %#v", preview)
+	}
+	before := decodeImageDataURL(t, preview.BeforeDataURL)
+	after := decodeImageDataURL(t, preview.AfterDataURL)
+	if before.Bounds() != after.Bounds() || before.Bounds().Dx() > 320 || before.Bounds().Dy() > 320 {
+		t.Fatalf("preview bounds before=%v after=%v", before.Bounds(), after.Bounds())
+	}
+	if imagesEqual(before, after) {
+		t.Fatal("before and after previews are identical")
+	}
+	const maxDataURLLength = 1024*1024 + 64
+	if len(preview.BeforeDataURL) > maxDataURLLength || len(preview.AfterDataURL) > maxDataURLLength {
+		t.Fatalf("preview data URLs are not bounded: before=%d after=%d", len(preview.BeforeDataURL), len(preview.AfterDataURL))
+	}
+}
+
+func TestPreviewWatermarkPreservesTransparency(t *testing.T) {
+	d := t.TempDir()
+	in := filepath.Join(d, "transparent.png")
+	source := image.NewNRGBA(image.Rect(0, 0, 320, 180))
+	f, err := os.Create(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, source); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	preview, err := New().PreviewWatermark(in, tools.WatermarkOptions{
+		Text: "alpha", FontFamily: "noto-sans-sc", FontSize: 72, Color: "#ffffff",
+		Opacity: 0.5, Position: "center",
+	}, 320)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := decodeImageDataURL(t, preview.BeforeDataURL)
+	after := decodeImageDataURL(t, preview.AfterDataURL)
+	if before.Bounds() != source.Bounds() || after.Bounds() != source.Bounds() {
+		t.Fatalf("preview bounds before=%v after=%v", before.Bounds(), after.Bounds())
+	}
+
+	watermarkAlpha := false
+	for y := before.Bounds().Min.Y; y < before.Bounds().Max.Y; y++ {
+		for x := before.Bounds().Min.X; x < before.Bounds().Max.X; x++ {
+			_, _, _, beforeAlpha := before.At(x, y).RGBA()
+			if beforeAlpha != 0 {
+				t.Fatalf("before preview lost transparency at (%d, %d): alpha=%d", x, y, beforeAlpha)
+			}
+			_, _, _, afterAlpha := after.At(x, y).RGBA()
+			if afterAlpha > 0 && afterAlpha < 0xffff {
+				watermarkAlpha = true
+			}
+		}
+	}
+	if !watermarkAlpha {
+		t.Fatal("after preview contains no semi-transparent watermark pixels")
+	}
+}
+
+func TestWatermarkPreviewPNGShrinksToPayloadLimit(t *testing.T) {
+	before := image.NewNRGBA(image.Rect(0, 0, 1024, 1024))
+	after := image.NewNRGBA(before.Bounds())
+	state := uint32(0x12345678)
+	for y := 0; y < before.Bounds().Dy(); y++ {
+		for x := 0; x < before.Bounds().Dx(); x++ {
+			state ^= state << 13
+			state ^= state >> 17
+			state ^= state << 5
+			before.SetNRGBA(x, y, color.NRGBA{R: uint8(state), G: uint8(state >> 8), B: uint8(state >> 16), A: uint8(state >> 24)})
+			after.SetNRGBA(x, y, color.NRGBA{R: uint8(state >> 24), G: uint8(state >> 16), B: uint8(state >> 8), A: uint8(state)})
+		}
+	}
+
+	beforeURL, afterURL, truncated, err := encodeWatermarkPreviewPair(before, after, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if truncated {
+		t.Fatal("bounded PNG preview was unexpectedly truncated")
+	}
+	const maxDataURLLength = 1024*1024 + 64
+	if len(beforeURL) > maxDataURLLength || len(afterURL) > maxDataURLLength {
+		t.Fatalf("preview data URLs exceed the payload limit: before=%d after=%d", len(beforeURL), len(afterURL))
+	}
+	beforePreview := decodeImageDataURL(t, beforeURL)
+	afterPreview := decodeImageDataURL(t, afterURL)
+	if beforePreview.Bounds() != afterPreview.Bounds() {
+		t.Fatalf("preview bounds differ: before=%v after=%v", beforePreview.Bounds(), afterPreview.Bounds())
+	}
+	if beforePreview.Bounds().Dx() >= before.Bounds().Dx() || beforePreview.Bounds().Dy() >= before.Bounds().Dy() {
+		t.Fatalf("high-entropy PNG preview was not reduced: %v", beforePreview.Bounds())
+	}
+}
+
+func decodeImageDataURL(t *testing.T, value string) image.Image {
+	t.Helper()
+	header, payload, ok := strings.Cut(value, ",")
+	if !ok || !strings.HasPrefix(header, "data:image/") || !strings.HasSuffix(header, ";base64") {
+		t.Fatalf("unexpected preview data URL header %q", header)
+	}
+	data, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return decoded
+}
+
+func imagesEqual(first, second image.Image) bool {
+	if first.Bounds() != second.Bounds() {
+		return false
+	}
+	for y := first.Bounds().Min.Y; y < first.Bounds().Max.Y; y++ {
+		for x := first.Bounds().Min.X; x < first.Bounds().Max.X; x++ {
+			if first.At(x, y) != second.At(x, y) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 type fakePDFRenderer struct {

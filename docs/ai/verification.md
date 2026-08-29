@@ -24,7 +24,9 @@ image formats, alpha handling, EXIF orientation, target-size warnings, and PDF D
 
 Frontend tests must cover navigation, empty/queued/processing/success/error/cancelled states,
 form validation, progress events, retry, locale switching, theme persistence, and compression
-preview updates.
+preview updates. Watermark coverage must include option validation, CJK text rendering, anchor and
+tiled placement, preset selection, stale-preview suppression, and keyboard operation of the
+before/after comparison slider.
 
 Fixtures should include a transparent image, an EXIF-rotated JPEG, one fixture for each supported
 codec, a corrupt file, a three-page PDF containing CJK text that relies on a non-embedded font,

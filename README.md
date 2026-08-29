@@ -9,6 +9,7 @@ Current tools:
 - Convert PNG, JPEG, WebP, AVIF, ICO, and SVG images. SVG output is a self-contained raster
   wrapper and ICO output is a PNG-backed icon (up to 256 pixels).
 - Compress supported images with quality or target-size controls.
+- Add configurable text watermarks with reusable presets and a live before/after comparison.
 - Render PDF pages to PNG at selectable DPI values.
 
 The application is built with Go, Wails, Vue 3, Vite, and shadcn-vue. File processing stays on

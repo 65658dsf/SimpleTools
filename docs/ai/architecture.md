@@ -77,6 +77,18 @@ workspace shows a local, byte-count-based estimate before processing; the encode
 source of truth. Target-size input uses binary B/KB/MB/GB units, selects a readable unit from the
 largest queued source image, and keeps the backend request in canonical bytes.
 
+### Image watermarking
+
+Text watermarks are rendered offline with the bundled Noto Sans SC font so output is deterministic
+across Windows and macOS and supports Simplified Chinese. A watermark may be positioned at one of
+nine anchors or repeated across the image, with configurable text, size, color, opacity, margin,
+spacing, rotation, and shadow. Output keeps the source image format, uses a `-watermarked` suffix,
+and follows the normal metadata, alpha, atomic-write, and collision rules.
+
+The workspace requests bounded before/after thumbnails from the same Go renderer used for export.
+Preview changes are debounced and stale responses are discarded; full image contents do not cross
+the Wails bridge.
+
 ### PDF to PNG
 
 MuPDF renders pages at 72, 150, 300, or 600 DPI (150 by default). Page expressions use inclusive
@@ -91,6 +103,7 @@ The Wails binding is the only UI/backend boundary:
 - `OpenInputFilesFromPaths` is the path-only bridge used by native drag-and-drop; it applies the
   same extension and folder expansion rules as the dialogs.
 - `PreviewImage` returns dimensions and a bounded thumbnail data URL only.
+- `PreviewWatermark` returns bounded before/after thumbnails rendered from watermark options.
 - `StartJob`, `GetJob`, and `CancelJob` manage asynchronous work.
 - `OpenOutputDirectory` reveals a validated output directory through the host platform.
 - `GetDefaultOutputDirectory` returns the executable-relative fallback output directory.

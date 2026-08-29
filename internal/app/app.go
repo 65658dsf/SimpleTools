@@ -10,7 +10,7 @@ import (
 	"image/draw"
 	_ "image/gif"
 	"image/jpeg"
-	_ "image/png"
+	"image/png"
 	"io"
 	"os"
 	"path/filepath"
@@ -23,6 +23,7 @@ import (
 	"github.com/65658dsf/SimpleTools/internal/platform"
 	"github.com/65658dsf/SimpleTools/internal/tools"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	xdraw "golang.org/x/image/draw"
 )
 
 type EventSink func(name string, payload any)
@@ -63,6 +64,15 @@ type Preview struct {
 	Size      int64  `json:"size"`
 	DataURL   string `json:"dataUrl,omitempty"`
 	Truncated bool   `json:"truncated,omitempty"`
+}
+
+type WatermarkPreview struct {
+	Path          string `json:"path"`
+	Width         int    `json:"width"`
+	Height        int    `json:"height"`
+	BeforeDataURL string `json:"beforeDataUrl,omitempty"`
+	AfterDataURL  string `json:"afterDataUrl,omitempty"`
+	Truncated     bool   `json:"truncated,omitempty"`
 }
 
 type JobItem struct {
@@ -442,6 +452,96 @@ func (a *App) PreviewImage(path string, options PreviewOptions) (*Preview, error
 	return preview, nil
 }
 
+// PreviewWatermark returns a bounded before/after pair for the comparison
+// slider. It uses the same renderer as final output and never exposes the
+// original file bytes across the Wails bridge.
+func (a *App) PreviewWatermark(path string, watermark tools.WatermarkOptions, maxDimension int) (*WatermarkPreview, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	img, err := tools.Decode(f, filepath.Ext(path))
+	if err != nil {
+		return nil, err
+	}
+	if maxDimension <= 0 {
+		maxDimension = 768
+	}
+	if maxDimension > 1024 {
+		maxDimension = 1024
+	}
+	if maxDimension < 64 {
+		maxDimension = 64
+	}
+	bounds := img.Bounds()
+	before := thumbnail(img, maxDimension)
+	previewScale := minFloat(
+		float64(before.Bounds().Dx())/float64(bounds.Dx()),
+		float64(before.Bounds().Dy())/float64(bounds.Dy()),
+	)
+	previewOptions, err := tools.ScaleWatermarkOptions(watermark, previewScale)
+	if err != nil {
+		return nil, err
+	}
+	after, err := tools.ApplyTextWatermark(before, previewOptions)
+	if err != nil {
+		return nil, err
+	}
+	beforeURL, afterURL, truncated, err := encodeWatermarkPreviewPair(before, after, maxDimension)
+	if err != nil {
+		return nil, err
+	}
+	return &WatermarkPreview{
+		Path:          path,
+		Width:         bounds.Dx(),
+		Height:        bounds.Dy(),
+		BeforeDataURL: beforeURL,
+		AfterDataURL:  afterURL,
+		Truncated:     truncated,
+	}, nil
+}
+
+func minFloat(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func encodeWatermarkPreviewPair(before, after image.Image, maxDimension int) (string, string, bool, error) {
+	const maxEncodedBytes = 768 * 1024
+	dimension := maxDimension
+	for {
+		beforeThumb, afterThumb := thumbnail(before, dimension), thumbnail(after, dimension)
+		beforeData, err := encodePreviewPNG(beforeThumb)
+		if err != nil {
+			return "", "", false, err
+		}
+		afterData, err := encodePreviewPNG(afterThumb)
+		if err != nil {
+			return "", "", false, err
+		}
+		if len(beforeData) <= maxEncodedBytes && len(afterData) <= maxEncodedBytes {
+			prefix := "data:image/png;base64,"
+			return prefix + base64.StdEncoding.EncodeToString(beforeData), prefix + base64.StdEncoding.EncodeToString(afterData), false, nil
+		}
+		if dimension <= 64 {
+			break
+		}
+		dimension = max(64, dimension*3/4)
+	}
+	return "", "", true, nil
+}
+
+func encodePreviewPNG(src image.Image) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, src); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func thumbnail(src image.Image, maxDimension int) image.Image {
 	b := src.Bounds()
 	if b.Dx() <= maxDimension && b.Dy() <= maxDimension {
@@ -450,13 +550,7 @@ func thumbnail(src image.Image, maxDimension int) image.Image {
 	scale := float64(maxDimension) / float64(max(b.Dx(), b.Dy()))
 	dw, dh := max(1, int(float64(b.Dx())*scale)), max(1, int(float64(b.Dy())*scale))
 	dst := image.NewRGBA(image.Rect(0, 0, dw, dh))
-	for y := 0; y < dh; y++ {
-		for x := 0; x < dw; x++ {
-			sx := b.Min.X + x*b.Dx()/dw
-			sy := b.Min.Y + y*b.Dy()/dh
-			dst.Set(x, y, src.At(sx, sy))
-		}
-	}
+	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, b, draw.Src, nil)
 	return dst
 }
 
@@ -726,7 +820,7 @@ func (a *App) processOne(ctx context.Context, j *job, input jobInput, req tools.
 		return processed{state: "failed", err: err}
 	}
 	outputFormat := format
-	if req.ToolKind() == tools.ToolCompress {
+	if req.ToolKind() == tools.ToolCompress || req.ToolKind() == tools.ToolWatermark {
 		outputFormat, err = tools.FormatFromPath(input.Path)
 		if err != nil {
 			return processed{state: "failed", err: err}
@@ -738,6 +832,9 @@ func (a *App) processOne(ctx context.Context, j *job, input jobInput, req tools.
 	}
 	dir := filepath.Join(req.OutputDirectory, input.RelDir)
 	base := tools.OutputBase(input.Name)
+	if req.ToolKind() == tools.ToolWatermark {
+		base += "-watermarked"
+	}
 	out, allocErr := allocator.next(dir, base, ext)
 	if allocErr != nil {
 		return processed{state: "failed", err: allocErr}
@@ -754,6 +851,12 @@ func (a *App) processOne(ctx context.Context, j *job, input jobInput, req tools.
 		}
 		data, result.warning = compressed.Data, joinWarnings(result.warning, compressed.Warning)
 	} else {
+		if req.ToolKind() == tools.ToolWatermark {
+			img, err = tools.ApplyTextWatermark(img, *req.Watermark)
+			if err != nil {
+				return processed{state: "failed", err: err}
+			}
+		}
 		data, err = tools.EncodeBytes(img, outputFormat, tools.EncodeOptions{Quality: req.Quality, Lossless: req.Lossless})
 		if err != nil {
 			return processed{state: "failed", err: err}

@@ -26,4 +26,6 @@ export function OpenOutputDirectory(arg1:string):Promise<void>;
 
 export function PreviewImage(arg1:string,arg2:app.PreviewOptions):Promise<app.Preview>;
 
+export function PreviewWatermark(arg1:string,arg2:tools.WatermarkOptions,arg3:number):Promise<app.WatermarkPreview>;
+
 export function StartJob(arg1:tools.JobRequest):Promise<string>;

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Download, FileImage, FileOutput, FileText, Languages, Loader2, Moon, Settings, Sun, X, Zap } from 'lucide-vue-next'
+import { Download, FileImage, FileOutput, FileText, Languages, Loader2, Moon, Settings, Stamp, Sun, X, Zap } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from './stores/workspace'
 import type { ToolId } from './types'
@@ -19,9 +19,13 @@ let stopUpdateProgress: () => void = () => undefined
 const tools = computed(() => [
   { id: 'convert' as ToolId, icon: FileOutput, label: t('convert'), detail: t('convertDesc') },
   { id: 'compress' as ToolId, icon: FileImage, label: t('compress'), detail: t('compressDesc') },
+  { id: 'watermark' as ToolId, icon: Stamp, label: t('watermark'), detail: t('watermarkDesc') },
   { id: 'pdf' as ToolId, icon: FileText, label: t('pdf'), detail: t('pdfDesc') },
 ])
-watch(() => route.params.tool, (tool) => { if (tool) store.setTool(tool as ToolId) }, { immediate: true })
+watch(() => route.path, (path) => {
+  const tool = path.slice(1) as ToolId
+  if (['convert', 'compress', 'watermark', 'pdf'].includes(tool)) store.setTool(tool)
+}, { immediate: true })
 watch(locale, value => {
   if (typeof window === 'undefined') return
   try { window.localStorage.setItem('simpletools-language', value) } catch { /* preferences are best effort */ }

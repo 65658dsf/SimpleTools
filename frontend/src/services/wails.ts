@@ -1,4 +1,4 @@
-import type { JobItem, JobRequest, JobStatus, NativeInputFile, Preview, PreviewOptions, UpdateInfo, UpdateProgress, WailsService } from '../types'
+import type { JobItem, JobRequest, JobStatus, NativeInputFile, Preview, PreviewOptions, UpdateInfo, UpdateProgress, WailsService, WatermarkPreview } from '../types'
 import * as App from '../../wailsjs/go/app/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 
@@ -19,14 +19,6 @@ function nativeApp(): Record<string, NativeMethod> | undefined {
   return root?.main?.App ?? root?.app?.App
 }
 
-function nativeCall<T>(method: string, ...args: unknown[]): Promise<T> {
-  const fn = nativeApp()?.[method]
-  if (!fn) {
-    return Promise.reject(new Error('Native Wails bridge is unavailable'))
-  }
-  return Promise.resolve(fn(...args) as T)
-}
-
 function listen<T>(event: string, callback: (payload: T) => void): () => void {
   const eventsOn = window.runtime?.EventsOn
   if (!eventsOn) return () => undefined
@@ -43,6 +35,7 @@ const nativeService: WailsService = {
   getDefaultOutputDirectory: () => App.GetDefaultOutputDirectory(),
   openOutputDirectory: path => App.OpenOutputDirectory(path),
   previewImage: (path, options = {}) => App.PreviewImage(path, options as never) as Promise<Preview>,
+  previewWatermark: (path, watermark, maxDimension = 960) => App.PreviewWatermark(path, watermark, maxDimension) as Promise<WatermarkPreview>,
   startJob: request => App.StartJob(request as never),
   getJob: id => App.GetJob(id) as Promise<JobStatus>,
   cancelJob: id => App.CancelJob(id),
@@ -70,6 +63,7 @@ const browserService: WailsService = {
     await new Promise<void>((resolve, reject) => { img.onload = () => resolve(); img.onerror = () => reject(new Error('Unable to preview image')) })
     return { path, width: img.naturalWidth, height: img.naturalHeight, format: path.split('.').pop() ?? '', size: 0, dataUrl: path, ...options }
   },
+  async previewWatermark() { throw new Error('Native watermark preview is unavailable') },
   async startJob(request) {
     await wait(500)
     return `browser-${Date.now()}-${request.tool}`
