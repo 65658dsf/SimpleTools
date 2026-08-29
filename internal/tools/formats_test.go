@@ -28,6 +28,13 @@ func TestSupportedCodecRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			config, err := DecodeConfig(bytes.NewReader(data), string(format))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := (image.Point{X: config.Width, Y: config.Height}); got != (image.Point{X: 8, Y: 6}) {
+				t.Fatalf("decoded config size %v", got)
+			}
 			if got := decoded.Bounds().Size(); got != (image.Point{X: 8, Y: 6}) {
 				t.Fatalf("decoded size %v", got)
 			}

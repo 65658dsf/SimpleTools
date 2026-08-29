@@ -42,6 +42,17 @@ export interface QRCodePreview {
   size: number
 }
 
+export interface QRCodeDecodeResult {
+  path: string
+  width: number
+  height: number
+  format: string
+  size: number
+  text: string
+  textBytes: number
+  truncated?: boolean
+}
+
 export interface NativeInputFile {
   path: string
   name: string
@@ -111,6 +122,7 @@ export interface JobStatus {
 
 export interface PreviewOptions {
   maxDimension?: number
+  maxPixels?: number
 }
 
 export interface Preview {
@@ -143,6 +155,7 @@ export interface WailsService {
   previewWatermark(path: string, watermark: WatermarkOptions, maxDimension?: number): Promise<WatermarkPreview>
   previewQRCode(options: QRCodeOptions, maxDimension?: number): Promise<QRCodePreview>
   saveQRCode(options: QRCodeOptions, outputDirectory: string, fileName: string): Promise<string>
+  decodeQRCode(path: string): Promise<QRCodeDecodeResult>
   startJob(request: JobRequest): Promise<string>
   getJob(id: string): Promise<JobStatus>
   cancelJob(id: string): Promise<void>

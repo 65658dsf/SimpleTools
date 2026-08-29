@@ -121,10 +121,16 @@ jobs:
           Copy-Item -LiteralPath 'LICENSE' -Destination $portable
           Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.md' -Destination $portable
           Copy-Item -LiteralPath 'internal/tools/assets/OFL-1.1.txt' -Destination $portable
+          $portableLicenses = Join-Path $portable 'third_party\licenses'
+          New-Item -ItemType Directory -Force -Path $portableLicenses | Out-Null
+          Copy-Item -LiteralPath 'third_party\licenses\gozxing-LICENSE.txt', 'third_party\licenses\jsqr-LICENSE.txt' -Destination $portableLicenses
           Copy-Item -LiteralPath $installer.FullName -Destination (Join-Path $release "SimpleTools-$version-windows-amd64-installer.exe")
           Copy-Item -LiteralPath 'LICENSE' -Destination $release
           Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.md' -Destination $release
           Copy-Item -LiteralPath 'internal/tools/assets/OFL-1.1.txt' -Destination $release
+          $releaseLicenses = Join-Path $release 'third_party\licenses'
+          New-Item -ItemType Directory -Force -Path $releaseLicenses | Out-Null
+          Copy-Item -LiteralPath 'third_party\licenses\gozxing-LICENSE.txt', 'third_party\licenses\jsqr-LICENSE.txt' -Destination $releaseLicenses
       - name: Create Windows portable archive and checksums
         shell: pwsh
         run: |
@@ -199,7 +205,9 @@ jobs:
           test -d "$app" || { echo "Wails did not produce $app" >&2; exit 1; }
           mkdir -p "$release"
           ditto "$app" "$staged"
+          mkdir -p "$staged/Contents/Resources/third_party/licenses"
           cp LICENSE THIRD_PARTY_NOTICES.md internal/tools/assets/OFL-1.1.txt "$staged/Contents/Resources/"
+          cp third_party/licenses/gozxing-LICENSE.txt third_party/licenses/jsqr-LICENSE.txt "$staged/Contents/Resources/third_party/licenses/"
           ditto -c -k --sequesterRsrc --keepParent "$staged" "$release/SimpleTools-${version}-macos-${{ matrix.arch }}.zip"
           find "$release" -maxdepth 1 -type f -name '*.zip' -print0 | xargs -0 shasum -a 256 > "$release/macos-${{ matrix.arch }}-sha256.txt"
       - uses: actions/upload-artifact@v4
@@ -241,7 +249,9 @@ jobs:
           mkdir -p "$release"
           ditto "$intel_app" "$universal"
           lipo -create "$intel_app/Contents/MacOS/SimpleTools" "$silicon_app/Contents/MacOS/SimpleTools" -output "$universal/Contents/MacOS/SimpleTools"
+          mkdir -p "$universal/Contents/Resources/third_party/licenses"
           cp LICENSE THIRD_PARTY_NOTICES.md internal/tools/assets/OFL-1.1.txt "$universal/Contents/Resources/"
+          cp third_party/licenses/gozxing-LICENSE.txt third_party/licenses/jsqr-LICENSE.txt "$universal/Contents/Resources/third_party/licenses/"
           lipo -info "$universal/Contents/MacOS/SimpleTools"
       - name: Package unsigned Universal app
         shell: bash
@@ -293,6 +303,7 @@ jobs:
           test -f "artifacts/SimpleTools-${version}-windows-amd64-installer.exe"
           test -f "artifacts/SimpleTools-${version}-macos-universal.dmg"
           cp LICENSE THIRD_PARTY_NOTICES.md internal/tools/assets/OFL-1.1.txt artifacts/
+          cp third_party/licenses/gozxing-LICENSE.txt third_party/licenses/jsqr-LICENSE.txt artifacts/
       - name: Sign update assets and generate manifest
         shell: bash
         run: |

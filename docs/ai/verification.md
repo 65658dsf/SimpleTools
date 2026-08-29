@@ -23,15 +23,17 @@ collision-safe names, atomic cleanup, cancellation, partial failure, page range 
 image formats, alpha handling, EXIF orientation, target-size warnings, and PDF DPI/page selection.
 QR code coverage must include UTF-8 and option validation, all four error-correction levels,
 capacity failures, exact PNG size and colors, bounded preview payloads, safe/default output names,
-collision suffixes, and decoding atomically saved output.
+collision suffixes, decoding atomically saved output, image metadata, no-code images, corrupt or
+unsupported inputs, and pixel/text safety limits.
 
 Frontend tests must cover navigation, empty/queued/processing/success/error/cancelled states,
 form validation, progress events, retry, locale switching, theme persistence, and compression
 preview updates. Watermark coverage must include option validation, CJK text rendering, anchor and
 tiled placement, preset selection, stale-preview suppression, and keyboard operation of the
-before/after comparison slider. QR code coverage must include navigation, persisted settings,
-text/byte validation, size and error-correction controls, custom colors, live preview updates,
-save state, and browser/native adapter behavior.
+before/after comparison slider. QR code coverage must include navigation, accessible secondary
+tabs, persisted settings, text/byte validation, size and error-correction controls, custom colors,
+live preview updates, save state, decode success/failure/clear states, and browser/native adapter
+behavior.
 
 Fixtures should include a transparent image, an EXIF-rotated JPEG, one fixture for each supported
 codec, a corrupt file, a three-page PDF containing CJK text that relies on a non-embedded font,

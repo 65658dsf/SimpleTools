@@ -28,6 +28,22 @@ const qrCodeLabels = [
   'qrSaveFailed',
   'qrSaving',
   'qrSave',
+  'qrGenerateTab',
+  'qrDecodeTab',
+  'qrDecodeDesc',
+  'qrDecodeDropTitle',
+  'qrDecodeDropHint',
+  'qrDecodeBrowse',
+  'qrDecodePreview',
+  'qrDecodeEmpty',
+  'qrDecoding',
+  'qrDecodedText',
+  'qrCopyText',
+  'qrCopied',
+  'qrDecodeFailed',
+  'qrDecodeNoCode',
+  'qrDecodeUnavailable',
+  'qrDecodeImageOnly',
 ] as const
 
 describe('frontend contract smoke tests', () => {

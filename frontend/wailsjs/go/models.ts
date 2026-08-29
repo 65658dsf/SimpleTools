@@ -128,7 +128,8 @@ export namespace app {
 	}
 	export class PreviewOptions {
 	    maxDimension?: number;
-	
+	    maxPixels?: number;
+
 	    static createFrom(source: any = {}) {
 	        return new PreviewOptions(source);
 	    }
@@ -136,6 +137,33 @@ export namespace app {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.maxDimension = source["maxDimension"];
+	        this.maxPixels = source["maxPixels"];
+	    }
+	}
+	export class QRCodeDecodeResult {
+	    path: string;
+	    width: number;
+	    height: number;
+	    format: string;
+	    size: number;
+	    text: string;
+	    textBytes: number;
+	    truncated?: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new QRCodeDecodeResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.width = source["width"];
+	        this.height = source["height"];
+	        this.format = source["format"];
+	        this.size = source["size"];
+	        this.text = source["text"];
+	        this.textBytes = source["textBytes"];
+	        this.truncated = source["truncated"];
 	    }
 	}
 	export class QRCodePreview {

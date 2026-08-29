@@ -55,7 +55,8 @@ type InputFile struct {
 }
 
 type PreviewOptions struct {
-	MaxDimension int `json:"maxDimension,omitempty"`
+	MaxDimension int   `json:"maxDimension,omitempty"`
+	MaxPixels    int64 `json:"maxPixels,omitempty"`
 }
 
 type Preview struct {
@@ -441,6 +442,19 @@ func (a *App) PreviewImage(path string, options PreviewOptions) (*Preview, error
 		return nil, err
 	}
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
+	if options.MaxPixels > 0 && st.Size() > tools.MaxQRCodeDecodeBytes {
+		return nil, fmt.Errorf("image exceeds the %d MiB file safety limit", tools.MaxQRCodeDecodeBytes/(1024*1024))
+	}
+	config, err := tools.DecodeConfig(f, ext)
+	if err != nil {
+		return nil, fmt.Errorf("decode image configuration: %w", err)
+	}
+	if err := validateImageDimensions(config.Width, config.Height, options.MaxPixels); err != nil {
+		return nil, err
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("rewind image: %w", err)
+	}
 	img, err := tools.Decode(f, ext)
 	if err != nil {
 		return nil, err
@@ -459,6 +473,16 @@ func (a *App) PreviewImage(path string, options PreviewOptions) (*Preview, error
 		preview.Truncated = true
 	}
 	return preview, nil
+}
+
+func validateImageDimensions(width, height int, maxPixels int64) error {
+	if width < 1 || height < 1 {
+		return errors.New("image dimensions must be positive")
+	}
+	if maxPixels > 0 && int64(width) > maxPixels/int64(height) {
+		return fmt.Errorf("image exceeds the %d-pixel safety limit", maxPixels)
+	}
+	return nil
 }
 
 // PreviewWatermark returns a bounded before/after pair for the comparison

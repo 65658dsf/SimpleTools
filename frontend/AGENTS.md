@@ -7,8 +7,9 @@ service contract.
 
 Keep all five tools usable at `/convert`, `/compress`, `/watermark`, `/qrcode`, and `/pdf`. Every
 queue state must have a visible loading, success, failure, retry, and cancellation representation.
-The QR code tool uses the dedicated `previewQRCode` and `saveQRCode` service methods instead of a
-file job; browser mode may render a local preview but must not pretend to save a file. New backend
-DTO fields must be reflected in `src/types.ts` and the generated binding adapter.
+The QR code tool uses the dedicated `previewQRCode`, `saveQRCode`, and `decodeQRCode` service
+methods instead of a file job. Browser mode may render or decode locally but must not pretend to
+save a file. New backend DTO fields must be reflected in `src/types.ts` and the generated binding
+adapter.
 
 Run `npm run typecheck`, `npm run lint`, `npm run test`, and `npm run build` from this directory.

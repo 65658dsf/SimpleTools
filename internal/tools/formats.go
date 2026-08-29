@@ -51,6 +51,53 @@ func ParseFormat(v string) (Format, error) {
 
 func FormatFromPath(p string) (Format, error) { return ParseFormat(filepath.Ext(p)) }
 
+// DecodeConfig reads an image header and returns its dimensions without
+// allocating the decoded pixel buffer. The custom ICO and SVG readers inspect
+// their embedded raster payloads with the same config-only path.
+func DecodeConfig(r io.Reader, ext string) (image.Config, error) {
+	if r == nil {
+		return image.Config{}, fmt.Errorf("image reader is required")
+	}
+	format, err := ParseFormat(ext)
+	if err != nil {
+		return image.Config{}, err
+	}
+	switch format {
+	case FormatPNG, FormatJPEG:
+		config, _, err := image.DecodeConfig(io.LimitReader(r, maxImageBytes+1))
+		if err != nil {
+			return image.Config{}, fmt.Errorf("decode %s config: %w", format, err)
+		}
+		return config, nil
+	case FormatWebP:
+		config, err := webp.DecodeConfig(io.LimitReader(r, maxImageBytes+1))
+		if err != nil {
+			return image.Config{}, fmt.Errorf("decode %s config: %w", format, err)
+		}
+		return config, nil
+	case FormatAVIF:
+		config, err := avif.DecodeConfig(io.LimitReader(r, maxImageBytes+1))
+		if err != nil {
+			return image.Config{}, fmt.Errorf("decode %s config: %w", format, err)
+		}
+		return config, nil
+	case FormatICO, FormatSVG:
+		data, err := io.ReadAll(io.LimitReader(r, maxImageBytes+1))
+		if err != nil {
+			return image.Config{}, err
+		}
+		if len(data) > maxImageBytes {
+			return image.Config{}, fmt.Errorf("image exceeds the %d MiB safety limit", maxImageBytes/(1024*1024))
+		}
+		if format == FormatICO {
+			return decodeICOConfig(data)
+		}
+		return decodeSVGConfig(data)
+	default:
+		return image.Config{}, fmt.Errorf("unsupported image format %q", format)
+	}
+}
+
 // Decode reads a supported image and applies the orientation stored in JPEG EXIF.
 // The codec packages use their own format sniffers, so the extension is only used
 // to select a helpful error when the bytes are not a supported image.
@@ -262,6 +309,49 @@ func decodeICO(data []byte) (image.Image, error) {
 	return nil, firstErr
 }
 
+func decodeICOConfig(data []byte) (image.Config, error) {
+	if len(data) < 22 {
+		return image.Config{}, fmt.Errorf("ICO header is truncated")
+	}
+	if binary.LittleEndian.Uint16(data[0:2]) != 0 || binary.LittleEndian.Uint16(data[2:4]) != 1 {
+		return image.Config{}, fmt.Errorf("invalid ICO header")
+	}
+	count := int(binary.LittleEndian.Uint16(data[4:6]))
+	if count < 1 || len(data) < 6+count*16 {
+		return image.Config{}, fmt.Errorf("ICO directory is truncated")
+	}
+	var firstErr error
+	for index := 0; index < count; index++ {
+		entry := data[6+index*16 : 6+(index+1)*16]
+		size := uint64(binary.LittleEndian.Uint32(entry[8:12]))
+		offset := uint64(binary.LittleEndian.Uint32(entry[12:16]))
+		if size == 0 || offset > uint64(len(data)) || size > uint64(len(data))-offset {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("ICO image entry %d is outside the file", index+1)
+			}
+			continue
+		}
+		payload := data[offset : offset+size]
+		if len(payload) < 8 || !bytes.Equal(payload[:8], []byte{137, 80, 78, 71, 13, 10, 26, 10}) {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("ICO image entry %d uses an unsupported bitmap encoding", index+1)
+			}
+			continue
+		}
+		config, _, err := image.DecodeConfig(bytes.NewReader(payload))
+		if err == nil {
+			return config, nil
+		}
+		if firstErr == nil {
+			firstErr = fmt.Errorf("decode ICO image entry %d: %w", index+1, err)
+		}
+	}
+	if firstErr == nil {
+		firstErr = fmt.Errorf("ICO contains no decodable image")
+	}
+	return image.Config{}, firstErr
+}
+
 type svgImageElement struct {
 	Href      string `xml:"href,attr"`
 	XLinkHref string `xml:"xlink:href,attr"`
@@ -306,19 +396,36 @@ func decodeSVG(data []byte) (image.Image, error) {
 	return nil, fmt.Errorf("SVG does not contain a supported embedded raster image")
 }
 
+func decodeSVGConfig(data []byte) (image.Config, error) {
+	var doc svgDocument
+	if err := xml.Unmarshal(data, &doc); err != nil {
+		return image.Config{}, fmt.Errorf("parse SVG: %w", err)
+	}
+	var firstErr error
+	for _, element := range doc.Images {
+		href := strings.TrimSpace(element.Href)
+		if href == "" {
+			href = strings.TrimSpace(element.XLinkHref)
+		}
+		config, err := decodeSVGDataURIConfig(href)
+		if err == nil {
+			return config, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if firstErr == nil {
+		firstErr = fmt.Errorf("SVG does not contain a supported embedded raster image")
+	}
+	return image.Config{}, firstErr
+}
+
 func decodeSVGDataURI(href string) (image.Image, error) {
-	if !strings.HasPrefix(strings.ToLower(href), "data:") {
-		return nil, fmt.Errorf("SVG image source must be a data URI")
-	}
-	header, encoded, ok := strings.Cut(href[5:], ",")
-	if !ok || !strings.Contains(strings.ToLower(header), ";base64") {
-		return nil, fmt.Errorf("SVG image source must use base64 encoding")
-	}
-	payload, err := base64.StdEncoding.DecodeString(encoded)
+	mime, payload, err := decodeSVGDataURIBytes(href)
 	if err != nil {
-		return nil, fmt.Errorf("decode SVG image data: %w", err)
+		return nil, err
 	}
-	mime := strings.ToLower(strings.TrimSpace(strings.SplitN(header, ";", 2)[0]))
 	switch mime {
 	case "image/png", "image/jpeg", "image/jpg":
 		img, _, err := image.Decode(bytes.NewReader(payload))
@@ -330,4 +437,38 @@ func decodeSVGDataURI(href string) (image.Image, error) {
 	default:
 		return nil, fmt.Errorf("unsupported embedded SVG image type %q", mime)
 	}
+}
+
+func decodeSVGDataURIConfig(href string) (image.Config, error) {
+	mime, payload, err := decodeSVGDataURIBytes(href)
+	if err != nil {
+		return image.Config{}, err
+	}
+	switch mime {
+	case "image/png", "image/jpeg", "image/jpg":
+		config, _, err := image.DecodeConfig(bytes.NewReader(payload))
+		return config, err
+	case "image/webp":
+		return webp.DecodeConfig(bytes.NewReader(payload))
+	case "image/avif":
+		return avif.DecodeConfig(bytes.NewReader(payload))
+	default:
+		return image.Config{}, fmt.Errorf("unsupported embedded SVG image type %q", mime)
+	}
+}
+
+func decodeSVGDataURIBytes(href string) (string, []byte, error) {
+	if !strings.HasPrefix(strings.ToLower(href), "data:") {
+		return "", nil, fmt.Errorf("SVG image source must be a data URI")
+	}
+	header, encoded, ok := strings.Cut(href[5:], ",")
+	if !ok || !strings.Contains(strings.ToLower(header), ";base64") {
+		return "", nil, fmt.Errorf("SVG image source must use base64 encoding")
+	}
+	payload, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", nil, fmt.Errorf("decode SVG image data: %w", err)
+	}
+	mime := strings.ToLower(strings.TrimSpace(strings.SplitN(header, ";", 2)[0]))
+	return mime, payload, nil
 }

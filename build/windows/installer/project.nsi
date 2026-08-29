@@ -97,6 +97,14 @@ Section
 
     !insertmacro wails.files
 
+    File /oname=LICENSE.txt "..\..\..\LICENSE"
+    File /oname=THIRD_PARTY_NOTICES.md "..\..\..\THIRD_PARTY_NOTICES.md"
+    File /oname=OFL-1.1.txt "..\..\..\internal\tools\assets\OFL-1.1.txt"
+    SetOutPath "$INSTDIR\third_party\licenses"
+    File "..\..\..\third_party\licenses\gozxing-LICENSE.txt"
+    File "..\..\..\third_party\licenses\jsqr-LICENSE.txt"
+    SetOutPath $INSTDIR
+
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
 

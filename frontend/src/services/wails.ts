@@ -1,7 +1,7 @@
-import type { JobItem, JobRequest, JobStatus, NativeInputFile, Preview, PreviewOptions, QRCodePreview, UpdateInfo, UpdateProgress, WailsService, WatermarkPreview } from '../types'
+import type { JobItem, JobRequest, JobStatus, NativeInputFile, Preview, PreviewOptions, QRCodeDecodeResult, QRCodePreview, UpdateInfo, UpdateProgress, WailsService, WatermarkPreview } from '../types'
 import * as App from '../../wailsjs/go/app/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
-import { renderBrowserQRCodePreview } from '../qrcode'
+import { decodeBrowserQRCode, renderBrowserQRCodePreview } from '../qrcode'
 
 type NativeMethod = (...args: unknown[]) => unknown
 
@@ -39,6 +39,7 @@ const nativeService: WailsService = {
   previewWatermark: (path, watermark, maxDimension = 960) => App.PreviewWatermark(path, watermark, maxDimension) as Promise<WatermarkPreview>,
   previewQRCode: (options, maxDimension = 512) => App.PreviewQRCode(options as never, maxDimension) as Promise<QRCodePreview>,
   saveQRCode: (options, outputDirectory, fileName) => App.SaveQRCode(options as never, outputDirectory, fileName),
+  decodeQRCode: path => App.DecodeQRCode(path) as Promise<QRCodeDecodeResult>,
   startJob: request => App.StartJob(request as never),
   getJob: id => App.GetJob(id) as Promise<JobStatus>,
   cancelJob: id => App.CancelJob(id),
@@ -69,6 +70,7 @@ const browserService: WailsService = {
   async previewWatermark() { throw new Error('Native watermark preview is unavailable') },
   previewQRCode: (options, maxDimension = 512) => renderBrowserQRCodePreview(options, maxDimension),
   async saveQRCode() { throw new Error('Native QR code saving is unavailable') },
+  decodeQRCode: path => decodeBrowserQRCode(path),
   async startJob(request) {
     await wait(500)
     return `browser-${Date.now()}-${request.tool}`

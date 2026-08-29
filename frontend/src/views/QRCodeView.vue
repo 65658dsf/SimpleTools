@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { AlertCircle, CheckCircle2, ChevronDown, Download, FolderOpen, Loader2, QrCode, RotateCcw } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import Button from '../components/ui/Button.vue'
+import QRCodeDecodePanel from '../components/QRCodeDecodePanel.vue'
 import { createLatestTaskScheduler } from '../latest-task'
-import { DEFAULT_QR_CODE, QR_CODE_ERROR_CORRECTIONS, QR_CODE_SIZES, qrCodeByteLength, qrCodeOptions } from '../qrcode'
+import { DEFAULT_QR_CODE, QR_CODE_ERROR_CORRECTIONS, QR_CODE_SIZES, qrCodeByteLength, qrCodeOptions, qrCodeTabForKey } from '../qrcode'
 import { wailsService } from '../services/wails'
 import { useWorkspaceStore } from '../stores/workspace'
+import type { QRCodeTab } from '../qrcode'
 import type { QRCodeErrorCorrection, QRCodeOptions, QRCodePreview } from '../types'
 
 const { t } = useI18n()
@@ -17,6 +19,9 @@ const previewError = ref('')
 const saving = ref(false)
 const saveError = ref('')
 const savedPath = ref('')
+const activeTab = ref<QRCodeTab>('generate')
+const generateTab = ref<HTMLButtonElement>()
+const decodeTab = ref<HTMLButtonElement>()
 
 store.setTool('qrcode')
 
@@ -64,6 +69,18 @@ function resetColors() {
   settings.value.background = DEFAULT_QR_CODE.background
 }
 
+function selectTab(tab: QRCodeTab) {
+  activeTab.value = tab
+}
+
+function handleTabKey(event: KeyboardEvent) {
+  const tab = qrCodeTabForKey(activeTab.value, event.key)
+  if (!tab) return
+  event.preventDefault()
+  selectTab(tab)
+  void nextTick(() => (tab === 'generate' ? generateTab.value : decodeTab.value)?.focus())
+}
+
 async function saveQRCode() {
   if (!canSave.value) return
   saving.value = true
@@ -93,10 +110,16 @@ onUnmounted(() => previewScheduler.dispose())
       <h1>{{ t('qrcode') }}</h1>
       <p>{{ t('qrcodeDesc') }}</p>
     </div>
-    <div class="header-stat"><span class="stat-value">{{ settings.size }}</span><span class="stat-label">px · PNG</span></div>
+    <div v-if="activeTab === 'generate'" class="header-stat"><span class="stat-value">{{ settings.size }}</span><span class="stat-label">px · PNG</span></div>
   </section>
 
-  <div class="qr-workspace">
+  <nav class="qr-tabs" role="tablist" :aria-label="t('qrcode')">
+    <button id="qr-generate-tab" ref="generateTab" role="tab" :aria-selected="activeTab === 'generate'" aria-controls="qr-generate-panel" :tabindex="activeTab === 'generate' ? 0 : -1" :class="{ selected: activeTab === 'generate' }" @click="selectTab('generate')" @keydown="handleTabKey">{{ t('qrGenerateTab') }}</button>
+    <button id="qr-decode-tab" ref="decodeTab" role="tab" :aria-selected="activeTab === 'decode'" aria-controls="qr-decode-panel" :tabindex="activeTab === 'decode' ? 0 : -1" :class="{ selected: activeTab === 'decode' }" @click="selectTab('decode')" @keydown="handleTabKey">{{ t('qrDecodeTab') }}</button>
+  </nav>
+
+  <div v-show="activeTab === 'generate'" id="qr-generate-panel" class="qr-tab-panel" role="tabpanel" aria-labelledby="qr-generate-tab">
+    <div class="qr-workspace">
     <section class="panel qr-preview-panel">
       <div class="panel-header">
         <div><h2>{{ t('livePreview') }}</h2><span class="muted">{{ byteCount }} {{ t('bytes') }}</span></div>
@@ -156,5 +179,7 @@ onUnmounted(() => previewScheduler.dispose())
         <Button class="primary-button" :disabled="!canSave" @click="saveQRCode"><Loader2 v-if="saving" class="spin qr-button-spinner" :size="17" /><Download v-else :size="17" />{{ saving ? t('qrSaving') : t('qrSave') }}</Button>
       </div>
     </aside>
+    </div>
   </div>
+  <QRCodeDecodePanel v-show="activeTab === 'decode'" id="qr-decode-panel" class="qr-tab-panel" role="tabpanel" aria-labelledby="qr-decode-tab" />
 </template>

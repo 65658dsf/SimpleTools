@@ -14,6 +14,10 @@ export function ChooseOutputDirectory() {
   return window['go']['app']['App']['ChooseOutputDirectory']();
 }
 
+export function DecodeQRCode(arg1) {
+  return window['go']['app']['App']['DecodeQRCode'](arg1);
+}
+
 export function DownloadAndInstallUpdate(arg1) {
   return window['go']['app']['App']['DownloadAndInstallUpdate'](arg1);
 }

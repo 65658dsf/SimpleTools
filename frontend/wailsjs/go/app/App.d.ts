@@ -10,6 +10,8 @@ export function CheckForUpdate():Promise<platform.UpdateInfo>;
 
 export function ChooseOutputDirectory():Promise<string>;
 
+export function DecodeQRCode(arg1:string):Promise<app.QRCodeDecodeResult>;
+
 export function DownloadAndInstallUpdate(arg1:string):Promise<void>;
 
 export function GetDefaultOutputDirectory():Promise<string>;

@@ -15,6 +15,7 @@ dependencies remain available in the corresponding source checkout and lockfiles
 | MuPDF | bundled by go-fitz v1.28.2 | AGPL-3.0-or-later or commercial | <https://mupdf.com>; license and source offer in the go-fitz/MuPDF source distribution | PDF rasterization in `mupdf` builds |
 | Noto Sans SC | 2.004-H2 subset (from `@fontsource/noto-sans-sc` v5.1.1) | OFL-1.1 | `internal/tools/assets/OFL-1.1.txt`; `internal/tools/assets/README.md`; <https://github.com/notofonts/noto-cjk> | Embedded Simplified Chinese font for MuPDF fallback and text watermarks |
 | skip2/go-qrcode | v0.0.0-20200617195104-da1b6568686e | MIT | <https://github.com/skip2/go-qrcode/tree/da1b6568686e>; `LICENSE` in the module source | Offline QR code generation |
+| gozxing | v0.1.1 | MIT and Apache-2.0 (original ZXing) | <https://github.com/makiuchi-d/gozxing/tree/v0.1.1>; `third_party/licenses/gozxing-LICENSE.txt` | Offline QR code image decoding |
 | gen2brain/webp | v0.6.4 | MIT | <https://github.com/gen2brain/webp/tree/v0.6.4>; `LICENSE` in the source | WebP Go binding |
 | libwebp | bundled by gen2brain/webp v0.6.4 | BSD-3-Clause | <https://chromium.googlesource.com/webm/libwebp/>; `lib/LICENSE.libwebp` in the source | WebP codec |
 | gen2brain/avif | v0.6.0 | MIT | <https://github.com/gen2brain/avif/tree/v0.6.0>; `LICENSE` in the source | AVIF Go binding |
@@ -30,10 +31,12 @@ is downloaded by the Windows installer and remains subject to Microsoft's terms.
 ## Frontend components
 
 The frontend runtime and build dependencies are pinned in `frontend/package-lock.json` and include
-Vue 3, Vite, TypeScript, Pinia, Vue Router, vue-i18n, lucide-vue-next, qrcode, Vitest and
+Vue 3, Vite, TypeScript, Pinia, Vue Router, vue-i18n, lucide-vue-next, qrcode, jsQR, Vitest and
 shadcn-vue. Their published packages are MIT-licensed unless their package metadata states
-otherwise. The lockfile is the authoritative version and integrity inventory for source and
-release audits.
+otherwise; jsQR is Apache-2.0 licensed. The complete jsQR license is in
+`third_party/licenses/jsqr-LICENSE.txt`; the complete gozxing license bundle is in
+`third_party/licenses/gozxing-LICENSE.txt`. The lockfile is the authoritative version and
+integrity inventory for source and release audits.
 
 ## AGPL source and notices
 
@@ -46,6 +49,7 @@ archive must include:
    frontend lockfiles and the MuPDF/go-fitz source or a written offer valid for the applicable
    distribution period.
 
-The release workflow copies `LICENSE` and this file into portable archives and macOS app resources,
-and publishes them beside signed release assets. Do not publish a signed artifact until the
+The release workflow copies `LICENSE`, this file, and the complete dependency license files into
+portable archives, macOS app resources, and the release bundle, and publishes them beside signed
+release assets. Do not publish a signed artifact until the
 generated notice inventory and the MuPDF source offer have been reviewed for that release.

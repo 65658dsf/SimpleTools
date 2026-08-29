@@ -31,6 +31,7 @@ internal/app
         +--> internal/tools/qrcode
         |      - text validation and offline PNG generation
         |      - QR error correction, sizing, and color options
+        |      - bounded offline QR image decoding
         |
         +--> internal/platform
                - native dialogs and paths
@@ -108,6 +109,11 @@ The workspace requests a bounded PNG data URL for live preview. Saving uses `qrc
 name is supplied, removes path components and unsafe filename characters, appends deterministic
 collision suffixes, and atomically writes below the validated or default output directory.
 
+The same route contains a secondary Generate/Decode tab interface. Native decoding sends only a
+canonical image path to Go; `internal/tools` scans the decoded pixels locally and returns bounded
+text plus image metadata. Browser development mode uses the local `jsQR` runtime and never uploads
+the selected image.
+
 ### PDF to PNG
 
 MuPDF renders pages at 72, 150, 300, or 600 DPI (150 by default). Page expressions use inclusive
@@ -121,11 +127,14 @@ The Wails binding is the only UI/backend boundary:
 - `OpenInputFiles`, `OpenInputFolder`, and `ChooseOutputDirectory` return validated path metadata.
 - `OpenInputFilesFromPaths` is the path-only bridge used by native drag-and-drop; it applies the
   same extension and folder expansion rules as the dialogs.
-- `PreviewImage` returns dimensions and a bounded thumbnail data URL only.
+- `PreviewImage` returns dimensions and a bounded thumbnail data URL only; callers may provide a
+  pixel safety limit so untrusted image headers are rejected before pixel allocation.
 - `PreviewWatermark` returns bounded before/after thumbnails rendered from watermark options.
 - `PreviewQRCode` returns a bounded PNG data URL and rendered square size from QR code options.
 - `SaveQRCode` validates QR code options and atomically writes a collision-safe PNG below the
   selected or default output directory.
+- `DecodeQRCode` accepts one canonical supported image path and returns bounded decoded text plus
+  source metadata without returning the image bytes.
 - `StartJob`, `GetJob`, and `CancelJob` manage asynchronous work.
 - `OpenOutputDirectory` reveals a validated output directory through the host platform.
 - `GetDefaultOutputDirectory` returns the executable-relative fallback output directory.
