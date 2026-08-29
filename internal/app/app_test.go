@@ -96,8 +96,12 @@ func TestStartJobUsesDefaultOutputDirectoryWhenUnset(t *testing.T) {
 	if status.State != "completed" || len(status.Outputs) != 1 {
 		t.Fatalf("unexpected status %#v", status)
 	}
-	if filepath.Dir(status.Outputs[0]) != out {
-		t.Fatalf("expected output below default directory %q, got %q", out, status.Outputs[0])
+	expectedOut, err := filepath.EvalSymlinks(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Clean(filepath.Dir(status.Outputs[0])) != filepath.Clean(expectedOut) {
+		t.Fatalf("expected output below default directory %q, got %q", expectedOut, status.Outputs[0])
 	}
 	select {
 	case paths := <-revealed:

@@ -33,7 +33,11 @@ func TestNormalizeRevealPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(paths) != 1 || paths[0] != file {
+	expected, err := filepath.EvalSymlinks(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 || paths[0] != filepath.Clean(expected) {
 		t.Fatalf("unexpected normalized paths: %#v", paths)
 	}
 }
