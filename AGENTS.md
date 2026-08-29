@@ -24,6 +24,7 @@ and PDF-to-PNG export.
 - `internal/platform`: filesystem, native dialogs, update transport, and platform-specific code.
 - `frontend/src`: Vue pages, stores, Wails client, translations, and design system styles.
 - `docs/ai`: architecture, verification, and delivery contracts.
+- `.agents/skills/simpletools-feature-development`: reusable workflow for new cross-layer features.
 - `.github/workflows`: CI and Ed25519-signed release automation.
 
 Dependency direction is `frontend -> Wails bindings -> internal/app -> internal/tools` and
@@ -76,6 +77,9 @@ Vite build listed above. Native packaging and MuPDF checks must run on the targe
 
 Before handoff, regenerate Wails bindings, run all local checks, inspect the final diff, and record
 native platform gaps instead of treating a cross-compiled binary as native verification.
+
+For a new user-facing tool, format, option, job workflow, or platform behavior, read
+`.agents/skills/simpletools-feature-development/SKILL.md` before editing.
 
 ## Non-negotiable invariants
 
