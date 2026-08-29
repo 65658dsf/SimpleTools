@@ -156,7 +156,10 @@ func (u *GitHubUpdater) DownloadAndInstall(info *UpdateInfo) error {
 	}
 	// Keep the installer on disk after this method returns. Removing a file
 	// immediately after exec.Start races with the platform installer opening it.
-	tmp, err := os.CreateTemp(cacheDir, "simpletools-update-*")
+	// Windows uses the file extension to decide whether a path is an
+	// executable. Keep the installer suffix on the downloaded temporary file;
+	// without it CreateProcess reports "executable file not found in %PATH%".
+	tmp, err := os.CreateTemp(cacheDir, updateTempPattern(runtime.GOOS))
 	if err != nil {
 		return err
 	}
@@ -226,6 +229,21 @@ func launchInstaller(path string) error {
 		return exec.Command("open", path).Start()
 	}
 	return fmt.Errorf("unsupported update platform %s", runtime.GOOS)
+}
+
+// updateTempPattern returns a temporary-file pattern with the extension
+// expected by the platform installer. os.CreateTemp appends the random
+// component at the '*' marker, so the resulting path remains unique while
+// retaining a launchable suffix.
+func updateTempPattern(goos string) string {
+	switch strings.ToLower(strings.TrimSpace(goos)) {
+	case "windows":
+		return "simpletools-update-*.exe"
+	case "darwin":
+		return "simpletools-update-*.dmg"
+	default:
+		return "simpletools-update-*"
+	}
 }
 
 func compareVersions(a, b string) int {
