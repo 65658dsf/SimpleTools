@@ -139,7 +139,9 @@ The Wails binding is the only UI/backend boundary:
 - `OpenOutputDirectory` reveals a validated output directory through the host platform.
 - `GetDefaultOutputDirectory` returns the executable-relative fallback output directory.
 - `CheckForUpdate` and `DownloadAndInstallUpdate` handle signed GitHub release assets after user
-  confirmation.
+  confirmation. On Windows, an installed copy reuses its registered installation directory, exits
+  through the Wails lifecycle after the elevated installer starts, and passes its process ID so
+  NSIS waits for the executable to be released before replacing it.
 
 Jobs emit `job:progress` and `job:item` snapshots while running, followed by `job:completed`; a
 batch with one or more failed items also emits `job:failed`. Update checks use `update:available`

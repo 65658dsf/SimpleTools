@@ -58,7 +58,10 @@ protected by Ed25519 signatures and SHA-256 checksums.
 Each packaged smoke test launches the app, opens a native dialog, processes one image and one PDF,
 generates and saves one QR code, verifies output files, cancels a batch, and checks the update
 prompt when a signed fixture manifest is available. Windows also checks missing-WebView2 bootstrap
-behavior.
+behavior. A Windows update smoke test must start from a non-default install directory, confirm that
+the NSIS directory page keeps that directory, and verify the running application exits before the
+installer writes `SimpleTools.exe`. UAC cancellation must leave the application running, while an
+update-process wait timeout must stop installation instead of ignoring the locked executable.
 
 ## Release evidence
 

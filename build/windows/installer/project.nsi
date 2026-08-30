@@ -49,6 +49,10 @@ VIAddVersionKey "ProductName"     "${INFO_PRODUCTNAME}"
 ManifestDPIAware true
 
 !include "MUI.nsh"
+!include "LogicLib.nsh"
+!include "FileFunc.nsh"
+
+Var UpdateProcessID
 
 !define MUI_ICON "..\icon.ico"
 !define MUI_UNICON "..\icon.ico"
@@ -66,6 +70,11 @@ ManifestDPIAware true
 
 !insertmacro MUI_LANGUAGE "English" # Set the fallback language of the installer
 !insertmacro MUI_LANGUAGE "SimpChinese" # Match Windows Simplified Chinese UI language automatically
+
+LangString UpdateProcessTimeout ${LANG_ENGLISH} "SimpleTools is still running. Close it and run the update again."
+LangString UpdateProcessTimeout ${LANG_SIMPCHINESE} "SimpleTools 仍在运行。请关闭程序后重新运行更新。"
+LangString UpdateProcessWaitFailed ${LANG_ENGLISH} "The installer could not confirm that SimpleTools has exited. Run the update again."
+LangString UpdateProcessWaitFailed ${LANG_SIMPCHINESE} "安装程序无法确认 SimpleTools 已退出。请重新运行更新。"
 
 ## The following two statements can be used to sign the installer and the uninstaller. The path to the binaries are provided in %1
 #!uninstfinalize 'signtool --file "%1"'
@@ -86,10 +95,46 @@ ShowInstDetails show # This will always show the installation details.
 
 Function .onInit
    !insertmacro wails.checkArchitecture
+   StrCpy $UpdateProcessID ""
+   ${GetParameters} $R0
+   ${GetOptions} $R0 "/UPDATEPID=" $UpdateProcessID
+FunctionEnd
+
+Function WaitForUpdateProcess
+    ${If} $UpdateProcessID == ""
+        Return
+    ${EndIf}
+
+    StrCpy $0 $UpdateProcessID
+    System::Call 'kernel32::OpenProcess(i 0x00100000, i 0, i r0) p.r1 ?e'
+    Pop $2
+    ${If} $1 == 0
+        # ERROR_INVALID_PARAMETER means the process exited before it could be
+        # opened. Other errors do not prove that the executable is unlocked.
+        ${If} $2 == 87
+            Return
+        ${EndIf}
+        MessageBox MB_ICONSTOP|MB_OK "$(UpdateProcessWaitFailed)" /SD IDOK
+        Abort
+    ${EndIf}
+
+    System::Call 'kernel32::WaitForSingleObject(p r1, i 60000) i.r2'
+    System::Call 'kernel32::CloseHandle(p r1)'
+    ${If} $2 == 258
+        MessageBox MB_ICONSTOP|MB_OK "$(UpdateProcessTimeout)" /SD IDOK
+        Abort
+    ${ElseIf} $2 != 0
+        MessageBox MB_ICONSTOP|MB_OK "$(UpdateProcessWaitFailed)" /SD IDOK
+        Abort
+    ${EndIf}
 FunctionEnd
 
 Section
     !insertmacro wails.setShellContext
+
+    # Automatic updates pass the running app's PID. Wait before touching the
+    # executable so Wails can finish its normal shutdown and release the file.
+    Call WaitForUpdateProcess
 
     !insertmacro wails.webview2runtime
 
@@ -112,6 +157,18 @@ Section
     !insertmacro wails.associateCustomProtocols
 
     !insertmacro wails.writeUninstaller
+
+    # Keep a canonical directory for later automatic updates. Older releases
+    # are still supported through their DisplayIcon uninstall value.
+    !ifdef WAILS_INSTALL_SCOPE
+      !if "${WAILS_INSTALL_SCOPE}" == "user"
+        WriteRegStr HKCU "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
+      !else
+        WriteRegStr HKLM "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
+      !endif
+    !else
+      WriteRegStr HKLM "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
+    !endif
 SectionEnd
 
 Section "uninstall"

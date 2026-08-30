@@ -44,6 +44,7 @@ type App struct {
 	// These hooks keep filesystem/UI side effects injectable in backend tests.
 	defaultOutputDir func() (string, error)
 	revealOutputs    func([]string) error
+	quitAfterUpdate  func(context.Context)
 }
 
 type InputFile struct {
@@ -207,13 +208,18 @@ func New(versions ...string) *App {
 		publicKey = strings.TrimSpace(versions[1])
 	}
 	_ = updater.SetPublicKey(publicKey)
+	var quitAfterUpdate func(context.Context)
+	if runtime.GOOS == "windows" {
+		quitAfterUpdate = wailsruntime.Quit
+	}
 	return &App{
-		jobs:       map[string]*job{},
-		updater:    updater,
-		pdfRender:  tools.DefaultPDFRenderer(),
-		imageSlots: make(chan struct{}, 4),
-		pdfSlots:   make(chan struct{}, 2),
-		version:    currentVersion,
+		jobs:            map[string]*job{},
+		updater:         updater,
+		pdfRender:       tools.DefaultPDFRenderer(),
+		imageSlots:      make(chan struct{}, 4),
+		pdfSlots:        make(chan struct{}, 2),
+		version:         currentVersion,
+		quitAfterUpdate: quitAfterUpdate,
 	}
 }
 
@@ -1294,5 +1300,13 @@ func (a *App) DownloadAndInstallUpdate(assetID string) error {
 		state = "failed"
 	}
 	a.emit("update:progress", map[string]any{"assetId": assetID, "state": state, "progress": 1})
+	if err == nil {
+		a.mu.RLock()
+		ctx, quit := a.ctx, a.quitAfterUpdate
+		a.mu.RUnlock()
+		if ctx != nil && quit != nil {
+			quit(ctx)
+		}
+	}
 	return err
 }
