@@ -124,6 +124,9 @@ func TestCompressionJobReportsActualByteCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	item := status.Items[0]
+	if item.JobID != id {
+		t.Fatalf("unexpected job id in terminal item: got %q want %q", item.JobID, id)
+	}
 	if item.OriginalBytes != sourceInfo.Size() || item.CompressedBytes != outputInfo.Size() {
 		t.Fatalf("unexpected job bytes: original=%d want=%d compressed=%d want=%d", item.OriginalBytes, sourceInfo.Size(), item.CompressedBytes, outputInfo.Size())
 	}
@@ -133,6 +136,9 @@ func TestCompressionJobReportsActualByteCounts(t *testing.T) {
 		select {
 		case event := <-itemEvents:
 			if event.State == "completed" {
+				if event.JobID != id {
+					t.Fatalf("unexpected job id in item event: got %q want %q", event.JobID, id)
+				}
 				if event.OriginalBytes != sourceInfo.Size() || event.CompressedBytes != outputInfo.Size() {
 					t.Fatalf("unexpected event bytes: %#v", event)
 				}
@@ -144,8 +150,8 @@ func TestCompressionJobReportsActualByteCounts(t *testing.T) {
 	}
 }
 
-func TestJobItemByteFieldsUseStableJSONNames(t *testing.T) {
-	encoded, err := json.Marshal(JobItem{ID: "item-1", Path: "source.png", Name: "source.png", State: "completed", OriginalBytes: 1234, CompressedBytes: 567})
+func TestJobItemFieldsUseStableJSONNames(t *testing.T) {
+	encoded, err := json.Marshal(JobItem{ID: "item-1", JobID: "job-1", Path: "source.png", Name: "source.png", State: "completed", OriginalBytes: 1234, CompressedBytes: 567})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,18 +159,20 @@ func TestJobItemByteFieldsUseStableJSONNames(t *testing.T) {
 	if err := json.Unmarshal(encoded, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["originalBytes"] != float64(1234) || payload["compressedBytes"] != float64(567) {
+	if payload["jobId"] != "job-1" || payload["originalBytes"] != float64(1234) || payload["compressedBytes"] != float64(567) {
 		t.Fatalf("unexpected byte fields in JSON: %s", encoded)
 	}
-	if _, ok := payload["OriginalBytes"]; ok {
-		t.Fatalf("Go field name leaked into JSON: %s", encoded)
+	for _, goField := range []string{"JobID", "OriginalBytes", "CompressedBytes"} {
+		if _, ok := payload[goField]; ok {
+			t.Fatalf("Go field name leaked into JSON: %s", encoded)
+		}
 	}
 	zeroEncoded, err := json.Marshal(JobItem{ID: "item-2", State: "queued"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(zeroEncoded), "originalBytes") || strings.Contains(string(zeroEncoded), "compressedBytes") {
-		t.Fatalf("zero byte fields should be omitted: %s", zeroEncoded)
+	if strings.Contains(string(zeroEncoded), "jobId") || strings.Contains(string(zeroEncoded), "originalBytes") || strings.Contains(string(zeroEncoded), "compressedBytes") {
+		t.Fatalf("zero optional fields should be omitted: %s", zeroEncoded)
 	}
 }
 

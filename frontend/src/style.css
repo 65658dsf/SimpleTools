@@ -58,6 +58,8 @@ h1 { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; letter-spacin
 .stat-label { color: #9ba3b1; font-size: 11px; }
 .drop-zone { --wails-drop-target: drop; border: 1px dashed #cad1de; border-radius: 9px; min-height: 202px; display: flex; flex-direction: column; justify-content: center; align-items: center; background: #fafbfe; transition: .18s ease; }
 .drop-zone:hover, .drop-zone.dragging { border-color: #ef765a; background: #fff7f4; }
+.drop-main-action { display: flex; flex: 1 1 auto; align-self: stretch; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; outline: 0; }
+.drop-main-action:focus-visible { outline: 2px solid rgba(239,118,90,.58); outline-offset: 5px; border-radius: 6px; }
 .upload-icon { color: #ef765a; background: #fff0ec; width: 46px; height: 46px; display: grid; place-items: center; border-radius: 12px; margin-bottom: 14px; }
 .drop-zone h2 { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; font-size: 17px; color: #343c4c; }
 .drop-zone p { color: #9aa2b0; font-size: 12px; margin: 6px 0 15px; }
@@ -184,6 +186,7 @@ h1 { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; letter-spacin
 .dark .home-tool-copy p { color: #a4adba; }
 
 .watermark-drop-zone { min-height: 106px; flex-direction: row; justify-content: flex-start; gap: 15px; padding: 16px 20px; }
+.watermark-drop-main-action { min-width: 0; flex: 1; flex-direction: row; justify-content: flex-start; align-items: center; gap: 15px; }
 .watermark-drop-zone .upload-icon { width: 42px; height: 42px; flex: 0 0 42px; margin: 0; border-radius: 9px; }
 .watermark-drop-copy { min-width: 0; flex: 1; }
 .watermark-drop-zone h2 { font-size: 14px; }

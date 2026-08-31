@@ -191,9 +191,11 @@ onUnmounted(() => {
     <div class="header-stat"><span class="stat-value">{{ store.files.length }}</span><span class="stat-label">{{ t('files') }}</span></div>
   </section>
 
-  <section class="drop-zone watermark-drop-zone" :class="{ dragging }" @dragenter.prevent="onDragEnter" @dragover.prevent="dragging = true" @dragleave.prevent="onDragLeave" @drop.prevent="onDrop" @click="browse">
-    <div class="upload-icon"><Upload :size="21" /></div>
-    <div class="watermark-drop-copy"><h2>{{ t('dropTitle') }}</h2><p>{{ t('dropHint') }}</p></div>
+  <section class="drop-zone watermark-drop-zone" role="region" :aria-label="t('dropTitle')" :class="{ dragging }" @dragenter.prevent="onDragEnter" @dragover.prevent="dragging = true" @dragleave.prevent="onDragLeave" @drop.prevent="onDrop">
+    <div class="drop-main-action watermark-drop-main-action" role="button" tabindex="0" :aria-label="t('browse')" @click="browse" @keydown.enter.prevent="browse" @keydown.space.prevent="browse">
+      <div class="upload-icon"><Upload :size="21" /></div>
+      <div class="watermark-drop-copy"><h2>{{ t('dropTitle') }}</h2><p>{{ t('dropHint') }}</p></div>
+    </div>
     <div class="drop-actions"><button class="secondary-button" @click.stop="browse"><Plus :size="16" /> {{ t('browse') }}</button><button class="secondary-button" @click.stop="browseFolder"><FolderTree :size="16" /> {{ t('folder') }}</button></div>
     <input ref="input" class="hidden-input" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.avif,.ico,.svg,image/*" @change="onInputChange" />
   </section>
@@ -231,7 +233,7 @@ onUnmounted(() => {
           <div v-for="item in store.files" :key="item.id" class="file-row watermark-file-row" :class="{ selected: item.id === selectedFile?.id }" @click="selectFile(item)">
             <button class="file-type watermark-file-select" :aria-label="`${t('selectPreview')}: ${item.name}`" :aria-pressed="item.id === selectedFile?.id" @click.stop="selectFile(item)"><img v-if="item.previewUrl" :src="item.previewUrl" :alt="item.name" /><FileImage v-else :size="18" /></button>
             <div class="file-meta"><div class="file-name" :title="item.name">{{ item.name }}</div><div class="file-sub">{{ formatSize(item.size) }}<span v-if="item.status === 'done'"> · {{ item.resultName }}</span></div><div v-if="item.status === 'processing' || item.status === 'queued'" class="progress-track"><span :style="{ width: `${item.progress}%` }"></span></div><div v-if="item.status === 'error'" class="error-copy"><AlertCircle :size="13" /> {{ item.error || t('failed') }}</div><div v-if="item.status === 'cancelled'" class="cancel-copy"><CircleSlash :size="13" /> {{ t('cancelled') }}</div><div v-if="item.warning" class="warning-copy">{{ item.warning }}</div></div>
-            <div class="file-status"><Loader2 v-if="item.status === 'processing'" class="spin" :size="16" /><CheckCircle2 v-else-if="item.status === 'done'" class="success" :size="17" /><button v-else-if="item.status === 'error'" class="icon-button small" :title="t('retry')" @click.stop="store.retry(item.id)"><RotateCcw :size="15" /></button><CircleSlash v-else-if="item.status === 'cancelled'" class="cancelled" :size="16" /><span v-else class="queue-dot"></span><button class="icon-button small remove-button" :disabled="item.status === 'processing'" :title="t('remove')" @click.stop="store.removeFile(item.id)"><X :size="15" /></button></div>
+            <div class="file-status"><Loader2 v-if="item.status === 'processing'" class="spin" :size="16" /><CheckCircle2 v-else-if="item.status === 'done'" class="success" :size="17" /><button v-else-if="item.status === 'error' || item.status === 'cancelled'" class="icon-button small" :disabled="store.running" :title="t('retry')" :aria-label="`${t('retry')}: ${item.name}`" @click.stop="store.retry(item.id)"><RotateCcw :size="15" /></button><span v-else class="queue-dot"></span><button class="icon-button small remove-button" :disabled="store.running || item.status === 'processing'" :title="t('remove')" :aria-label="`${t('remove')}: ${item.name}`" @click.stop="store.removeFile(item.id)"><X :size="15" /></button></div>
           </div>
         </div>
       </section>

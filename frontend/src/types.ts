@@ -114,6 +114,7 @@ export interface RecentJobSummary {
 
 export interface JobItem {
   id: string
+  jobId?: string
   path: string
   name: string
   state: string

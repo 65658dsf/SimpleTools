@@ -2,7 +2,7 @@ import { nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { DEFAULT_QR_CODE } from './qrcode'
-import { estimateCompressedSize, targetBytesToValue, targetUnitForBytes, targetValueToBytes, useWorkspaceStore } from './stores/workspace'
+import { estimateCompressedSize, jobItemBelongsToJob, queueStatusForJobState, targetBytesToValue, targetUnitForBytes, targetValueToBytes, useWorkspaceStore } from './stores/workspace'
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>()
@@ -25,6 +25,24 @@ function pdfFile(name: string) {
 
 describe('workspace queue behavior', () => {
   beforeEach(() => setActivePinia(createPinia()))
+
+  it('maps every native item state without turning queued items into processing', () => {
+    expect(queueStatusForJobState('queued')).toBe('queued')
+    expect(queueStatusForJobState('processing')).toBe('processing')
+    expect(queueStatusForJobState('running')).toBe('processing')
+    expect(queueStatusForJobState('completed')).toBe('done')
+    expect(queueStatusForJobState('failed')).toBe('error')
+    expect(queueStatusForJobState('cancelled')).toBe('cancelled')
+    expect(queueStatusForJobState('unknown')).toBe('processing')
+  })
+
+  it('filters item events by explicit job id with legacy id fallback', () => {
+    expect(jobItemBelongsToJob({ id: 'item-1', jobId: 'job-1' }, 'job-1')).toBe(true)
+    expect(jobItemBelongsToJob({ id: 'job-2-item-1', jobId: 'job-2' }, 'job-1')).toBe(false)
+    expect(jobItemBelongsToJob({ id: 'job-1-item-1' }, 'job-1')).toBe(true)
+    expect(jobItemBelongsToJob({ id: 'job-2-item-1' }, 'job-1')).toBe(false)
+    expect(jobItemBelongsToJob({ id: 'job-1-item-1' }, '')).toBe(false)
+  })
 
   it('filters queue entries when switching tools', () => {
     const store = useWorkspaceStore()
@@ -103,6 +121,20 @@ describe('workspace queue behavior', () => {
     expect(store.setTool('pdf')).toBe(false)
     expect(store.activeTool).toBe('convert')
     expect(store.files).toHaveLength(1)
+
+    await store.cancel()
+    await processing
+  })
+
+  it('does not remove queued files while a batch is processing', async () => {
+    const store = useWorkspaceStore()
+    store.addFiles([imageFile('one.png'), imageFile('two.png')])
+    const queuedId = store.files[1].id
+    const processing = store.process()
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    store.removeFile(queuedId)
+    expect(store.files).toHaveLength(2)
 
     await store.cancel()
     await processing

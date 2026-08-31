@@ -88,6 +88,7 @@ type QRCodePreview struct {
 
 type JobItem struct {
 	ID              string   `json:"id"`
+	JobID           string   `json:"jobId,omitempty"`
 	Path            string   `json:"path"`
 	Name            string   `json:"name"`
 	State           string   `json:"state"`
@@ -477,9 +478,6 @@ func (a *App) PreviewImage(path string, options PreviewOptions) (*Preview, error
 		return nil, err
 	}
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
-	if options.MaxPixels > 0 && st.Size() > tools.MaxQRCodeDecodeBytes {
-		return nil, fmt.Errorf("image exceeds the %d MiB file safety limit", tools.MaxQRCodeDecodeBytes/(1024*1024))
-	}
 	config, err := tools.DecodeConfig(f, ext)
 	if err != nil {
 		return nil, fmt.Errorf("decode image configuration: %w", err)
@@ -816,7 +814,7 @@ func (a *App) StartJob(req tools.JobRequest) (string, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	items := make([]JobItem, len(inputs))
 	for i, input := range inputs {
-		items[i] = JobItem{ID: fmt.Sprintf("%s-item-%d", id, i+1), Path: input.Path, Name: input.Name, State: "queued"}
+		items[i] = JobItem{ID: fmt.Sprintf("%s-item-%d", id, i+1), JobID: id, Path: input.Path, Name: input.Name, State: "queued"}
 	}
 	j := &job{JobStatus: JobStatus{ID: id, State: "queued", Total: len(inputs), Items: items, StartedAt: time.Now()}, cancel: cancel, inputs: inputs}
 	a.mu.Lock()

@@ -21,7 +21,23 @@ const FORMAT_OPTIONS = ['webp', 'jpg', 'png', 'avif', 'ico', 'svg'] as const
 const DPI_OPTIONS = [72, 150, 300, 600] as const
 export const TARGET_BYTES_UNITS = ['B', 'KB', 'MB', 'GB'] as const
 export type TargetBytesUnit = typeof TARGET_BYTES_UNITS[number]
-export type QueueFilter = 'all' | 'queued' | 'processing' | 'done' | 'error'
+export type QueueFilter = 'all' | 'queued' | 'processing' | 'done' | 'error' | 'cancelled'
+
+/** Translate native job states into the queue's display states. */
+export function queueStatusForJobState(state: string): QueueFile['status'] {
+  if (state === 'queued') return 'queued'
+  if (state === 'processing' || state === 'running') return 'processing'
+  if (state === 'completed') return 'done'
+  if (state === 'failed') return 'error'
+  if (state === 'cancelled') return 'cancelled'
+  return 'processing'
+}
+
+/** Check whether an item event belongs to the currently observed job. */
+export function jobItemBelongsToJob(item: Pick<JobItem, 'id' | 'jobId'>, jobId: string): boolean {
+  if (!jobId) return false
+  return item.jobId ? item.jobId === jobId : item.id.startsWith(`${jobId}-item-`)
+}
 
 const BYTES_PER_TARGET_UNIT: Record<TargetBytesUnit, number> = {
   B: 1,
@@ -294,7 +310,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const isEligible = (_item: QueueFile) => true
   const canProcess = computed(() => {
     const hasValidWatermark = activeTool.value !== 'watermark' || Boolean(settings.value.watermark.text.trim())
-    return !running.value && hasValidWatermark && files.value.some(item => isEligible(item) && (item.status === 'queued' || item.status === 'error'))
+    return !running.value && hasValidWatermark && files.value.some(item => isEligible(item) && (item.status === 'queued' || item.status === 'error' || item.status === 'cancelled'))
   })
 
   function autoSelectTargetUnit() {
@@ -327,7 +343,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (running.value && tool !== activeTool.value) return false
     activeTool.value = tool
     if (!running.value) {
-      files.value = files.value.filter(item => activeTool.value === 'pdf' ? item.type === 'application/pdf' : item.type.startsWith('image/'))
+      const nextFiles = files.value.filter(item => activeTool.value === 'pdf' ? item.type === 'application/pdf' : item.type.startsWith('image/'))
+      files.value.filter(item => !nextFiles.includes(item)).forEach(releasePreview)
+      files.value = nextFiles
     }
     autoSelectTargetUnit()
     return true
@@ -523,6 +541,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : 'inputs-unavailable' }
     }
+    // The file dialog/metadata lookup is asynchronous. Another job may have
+    // started while it was in flight; do not replace that job's queue when the
+    // lookup eventually returns.
+    if (running.value) return { ok: false, message: 'processing' }
     if (!selected.length) return { ok: false, message: 'inputs-unavailable' }
     const relativeDirs = request.inputRelativeDirs ?? {}
     selected = selected.map(file => ({ ...file, relativePath: relativeDirs[file.path] ?? file.relativePath }))
@@ -534,7 +556,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return { ok: true }
   }
 
-  function removeFile(fileId: string) { const item = files.value.find(entry => entry.id === fileId); if (!item || item.status === 'processing') return; releasePreview(item); files.value = files.value.filter(entry => entry.id !== fileId); autoSelectTargetUnit() }
+  function removeFile(fileId: string) { const item = files.value.find(entry => entry.id === fileId); if (!item || running.value || item.status === 'processing') return; releasePreview(item); files.value = files.value.filter(entry => entry.id !== fileId); autoSelectTargetUnit() }
   function clearFiles() { if (running.value) return; files.value.forEach(releasePreview); files.value = []; autoSelectTargetUnit() }
   function resetForRetry(item: QueueFile) {
     releaseResultPreview(item)
@@ -548,7 +570,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     item.originalBytes = undefined
     item.compressedBytes = undefined
   }
-  function retry(fileId: string) { const item = files.value.find(entry => entry.id === fileId); if (item) resetForRetry(item) }
+  function retry(fileId: string) {
+    if (running.value) return
+    const item = files.value.find(entry => entry.id === fileId)
+    if (item && (item.status === 'error' || item.status === 'cancelled')) resetForRetry(item)
+  }
   function retryFailed() { if (running.value) return; files.value.filter(item => item.status === 'error').forEach(resetForRetry) }
   function clearCompleted() { if (running.value) return; files.value.filter(item => item.status === 'done').forEach(releasePreview); files.value = files.value.filter(item => item.status !== 'done'); autoSelectTargetUnit() }
   function setOutputDir(dir: string) { outputDir.value = dir }
@@ -560,7 +586,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return Math.round((1 - item.compressedBytes / item.originalBytes) * 100)
   }
 
-  function nativeRequest(source = files.value.filter(item => item.status === 'queued' || item.status === 'error')): JobRequest {
+  function nativeRequest(source = files.value.filter(item => item.status === 'queued' || item.status === 'error' || item.status === 'cancelled')): JobRequest {
     return {
       tool: activeTool.value,
       inputs: source.map(item => item.path).filter((path): path is string => Boolean(path)),
@@ -579,7 +605,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   async function process() {
-    const processable = files.value.filter(item => isEligible(item) && (item.status === 'queued' || item.status === 'error'))
+    const processable = files.value.filter(item => isEligible(item) && (item.status === 'queued' || item.status === 'error' || item.status === 'cancelled'))
     if (!processable.length || running.value || (activeTool.value === 'watermark' && !settings.value.watermark.text.trim())) return
     running.value = true
     cancelRequested.value = false
@@ -612,7 +638,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         wakeEvent?.()
       }
       const onItem = (item: JobItem) => {
-        if (!activeJobId.value || !item.id.startsWith(`${activeJobId.value}-item-`)) return
+        if (!jobItemBelongsToJob(item, activeJobId.value ?? '')) return
         lastEventAt = Date.now()
         applyItem(item)
         wakeEvent?.()
@@ -702,22 +728,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if ('items' in status) status.items?.forEach(applyItem)
     if ('item' in status && status.item) applyItem(status.item)
     files.value.forEach(item => {
-      if (item.path && status.current === item.path && item.status === 'queued') item.status = 'processing'
+      if ((status.state === 'queued' || status.state === 'running' || status.state === 'processing')
+        && item.path && status.current === item.path && item.status === 'queued') item.status = 'processing'
     })
   }
 
   function applyItem(item: JobItem) {
-    let target = files.value.find(entry => entry.path === item.path)
-    if (!target) {
-      const sameName = files.value.filter(entry => entry.name === item.name)
-      if (sameName.length === 1) target = sameName[0]
-    }
+    // Native paths are canonicalized by the backend and are the only stable
+    // identity when different folders contain files with the same name.
+    const target = files.value.find(entry => entry.path === item.path)
     if (!target) return
     target.progress = item.progress >= 1 ? 100 : Math.round(item.progress * 100)
-    if (item.state === 'completed') target.status = 'done'
-    else if (item.state === 'failed') target.status = 'error'
-    else if (item.state === 'cancelled') target.status = 'cancelled'
-    else target.status = 'processing'
+    target.status = queueStatusForJobState(item.state)
     target.error = item.error
     target.warning = item.warning
     target.originalBytes = item.originalBytes

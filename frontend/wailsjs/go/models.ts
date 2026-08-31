@@ -22,6 +22,7 @@ export namespace app {
 	}
 	export class JobItem {
 	    id: string;
+	    jobId?: string;
 	    path: string;
 	    name: string;
 	    state: string;
@@ -40,6 +41,7 @@ export namespace app {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
+	        this.jobId = source["jobId"];
 	        this.path = source["path"];
 	        this.name = source["name"];
 	        this.state = source["state"];
