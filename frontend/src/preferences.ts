@@ -21,8 +21,16 @@ export const systemDark = ref(typeof window !== 'undefined' && window.matchMedia
 export const isDark = computed(() => themeMode.value === 'dark' || themeMode.value === 'system' && systemDark.value)
 
 let initialized = false
+function syncNativeTheme() {
+  if (typeof window === 'undefined' || !window.runtime) return
+  if (themeMode.value === 'system') window.runtime.WindowSetSystemDefaultTheme?.()
+  else if (isDark.value) window.runtime.WindowSetDarkTheme?.()
+  else window.runtime.WindowSetLightTheme?.()
+}
+
 export function applyTheme() {
   if (typeof document !== 'undefined') document.documentElement.classList.toggle('dark', isDark.value)
+  syncNativeTheme()
 }
 
 export function initPreferences() {

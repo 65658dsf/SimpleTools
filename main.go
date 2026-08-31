@@ -35,6 +35,21 @@ func main() {
 		Bind:             []interface{}{application},
 		Windows: &windows.Options{
 			WebviewUserDataPath: "SimpleTools",
+			Theme:               windows.SystemDefault,
+			CustomTheme: &windows.ThemeSettings{
+				DarkModeTitleBar:           windows.RGB(24, 28, 36),
+				DarkModeTitleBarInactive:   windows.RGB(29, 34, 43),
+				DarkModeTitleText:          windows.RGB(236, 240, 246),
+				DarkModeTitleTextInactive:  windows.RGB(174, 182, 196),
+				DarkModeBorder:             windows.RGB(52, 59, 73),
+				DarkModeBorderInactive:     windows.RGB(43, 49, 60),
+				LightModeTitleBar:          windows.RGB(248, 250, 252),
+				LightModeTitleBarInactive:  windows.RGB(242, 245, 249),
+				LightModeTitleText:         windows.RGB(32, 38, 52),
+				LightModeTitleTextInactive: windows.RGB(114, 123, 139),
+				LightModeBorder:            windows.RGB(223, 228, 236),
+				LightModeBorderInactive:    windows.RGB(229, 232, 239),
+			},
 		},
 		Mac: &mac.Options{
 			TitleBar: mac.TitleBarHiddenInset(),

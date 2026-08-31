@@ -11,6 +11,9 @@ declare global {
     runtime?: {
       EventsOn?: (name: string, callback: (payload: unknown) => void) => (() => void) | void
       EventsOff?: (name: string) => void
+      WindowSetSystemDefaultTheme?: () => void
+      WindowSetLightTheme?: () => void
+      WindowSetDarkTheme?: () => void
     }
   }
 }
