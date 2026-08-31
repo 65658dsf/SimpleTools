@@ -15,6 +15,7 @@ const dark = isDark
 const updateInfo = ref<UpdateInfo>()
 const updateProgress = ref<UpdateProgress>()
 const hasActiveWork = computed(() => store.running || store.files.some(item => item.status === 'queued' || item.status === 'processing'))
+const lastToolPath = ref('')
 const updateError = ref('')
 let stopUpdateAvailable: () => void = () => undefined
 let stopUpdateProgress: () => void = () => undefined
@@ -27,7 +28,13 @@ const tools = computed(() => [
 ])
 watch(() => route.path, (path) => {
   const tool = path.slice(1) as ToolId
-  if (['convert', 'compress', 'watermark', 'qrcode', 'pdf'].includes(tool)) store.setTool(tool)
+  if (!['convert', 'compress', 'watermark', 'qrcode', 'pdf'].includes(tool)) return
+  if (store.running && tool !== store.activeTool) {
+    const fallback = lastToolPath.value || `/${store.activeTool}`
+    if (path !== fallback) void router.replace(fallback)
+    return
+  }
+  if (store.setTool(tool)) lastToolPath.value = path
 }, { immediate: true })
 watch(locale, value => {
   if (typeof window === 'undefined') return
@@ -44,7 +51,10 @@ onMounted(() => {
   void wailsService.checkForUpdate().then(info => { if (info.available) updateInfo.value = info }).catch(() => undefined)
 })
 onUnmounted(() => { stopUpdateAvailable(); stopUpdateProgress() })
-function navigate(id: ToolId) { store.setTool(id); router.push(`/${id}`) }
+function navigate(id: ToolId) {
+  if (!store.setTool(id)) return
+  void router.push(`/${id}`)
+}
 function toggleTheme() { setThemeMode(dark.value ? 'light' : 'dark') }
 function toggleLocale() { locale.value = locale.value === 'en' ? 'zh' : 'en' }
 async function installUpdate() {
@@ -85,10 +95,12 @@ async function installUpdate() {
         <div class="mobile-brand"><span class="brand-mark">
             <Zap :size="15" />
           </span>{{ t('appName') }}</div>
-        <div v-if="hasActiveWork" class="global-progress" role="status"
+        <div
+v-if="hasActiveWork" class="global-progress" role="status"
           :aria-label="`${t('processing')} ${store.progress}%`"><span class="global-progress-track"><i
               :style="{ width: `${store.progress}%` }"></i></span><strong>{{ store.progress }}%</strong></div>
-        <div class="topbar-actions"><button v-if="updateInfo?.available" class="update-button"
+        <div class="topbar-actions"><button
+v-if="updateInfo?.available" class="update-button"
             :title="t('updateAvailable')" @click="installUpdate">
             <Loader2 v-if="updateProgress?.state === 'started'" class="spin" :size="16" />
             <Download v-else :size="16" /><span>{{ updateProgress?.state === 'started' ? t('updating') :
@@ -105,7 +117,8 @@ async function installUpdate() {
         <button class="mobile-tool-link" :class="{ active: route.path === '/recent' }" @click="router.push('/recent')">
           <Clock3 :size="16" /><span>{{ t('recent') }}</span>
         </button>
-        <button class="mobile-tool-link" :class="{ active: route.path === '/settings' }"
+        <button
+class="mobile-tool-link" :class="{ active: route.path === '/settings' }"
           @click="router.push('/settings')">
           <Settings :size="16" /><span>{{ t('preferences') }}</span>
         </button>

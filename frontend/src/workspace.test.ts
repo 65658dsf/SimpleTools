@@ -93,6 +93,20 @@ describe('workspace queue behavior', () => {
     expect(store.files.some(item => item.status === 'cancelled')).toBe(true)
     expect(store.running).toBe(false)
   })
+
+  it('does not switch tools while a queue is processing', async () => {
+    const store = useWorkspaceStore()
+    store.addFiles([imageFile('one.png')])
+    const processing = store.process()
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(store.setTool('pdf')).toBe(false)
+    expect(store.activeTool).toBe('convert')
+    expect(store.files).toHaveLength(1)
+
+    await store.cancel()
+    await processing
+  })
 })
 
 describe('compression size estimate', () => {
@@ -273,5 +287,23 @@ describe('recent jobs', () => {
     const store = useWorkspaceStore()
     expect(store.recentJobs).toHaveLength(20)
     expect(store.recentJobs[0].id).toBe('job-0')
+  })
+
+  it('keeps legacy recent jobs that do not have a request snapshot', () => {
+    storage.setItem('simpletools-recent-jobs', JSON.stringify([{
+      id: 'legacy-job',
+      tool: 'convert',
+      total: 2,
+      completed: 2,
+      failed: 0,
+      outputDirectory: '',
+      finishedAt: new Date().toISOString(),
+      inputPaths: ['photo-a.png', 'photo-b.png'],
+    }]))
+
+    const store = useWorkspaceStore()
+    expect(store.recentJobs).toHaveLength(1)
+    expect(store.recentJobs[0].request).toBeUndefined()
+    expect(store.recentJobs[0].cancelled).toBe(0)
   })
 })

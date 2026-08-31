@@ -4,9 +4,11 @@ import { ArrowRight, FileImage, FileOutput, FileText, QrCode, Stamp } from 'luci
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import type { ToolId } from '../types'
+import { useWorkspaceStore } from '../stores/workspace'
 
 const { t } = useI18n()
 const router = useRouter()
+const store = useWorkspaceStore()
 const tools = computed(() => [
   { id: 'convert' as ToolId, icon: FileOutput, title: t('convert'), detail: t('convertDesc') },
   { id: 'compress' as ToolId, icon: FileImage, title: t('compress'), detail: t('compressDesc') },
@@ -16,6 +18,7 @@ const tools = computed(() => [
 ])
 
 function openTool(tool: ToolId) {
+  if (!store.setTool(tool)) return
   void router.push(`/${tool}`)
 }
 </script>

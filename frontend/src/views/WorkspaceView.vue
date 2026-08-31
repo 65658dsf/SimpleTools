@@ -65,7 +65,8 @@ function compressionComparison(item: { originalBytes?: number, compressedBytes?:
   if (item.originalBytes === undefined || item.compressedBytes === undefined || item.originalBytes <= 0) return ''
   const savings = Math.round((1 - item.compressedBytes / item.originalBytes) * 100)
   const sign = savings >= 0 ? '-' : '+'
-  return `${formatSize(item.originalBytes)} → ${formatSize(item.compressedBytes)} (${sign}${Math.abs(savings)}% ${t('compressionSavings')})`
+  const label = savings >= 0 ? t('compressionSavings') : t('compressionLarger')
+  return `${formatSize(item.originalBytes)} → ${formatSize(item.compressedBytes)} (${sign}${Math.abs(savings)}% ${label})`
 }
 function filterCount(value: QueueFilter) {
   return value === 'all' ? store.files.length : store.files.filter(item => item.status === value).length

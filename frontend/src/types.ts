@@ -94,6 +94,7 @@ export interface JobRequest {
   recursive?: boolean
   dpi?: number
   pageRange?: string
+  maxPixels?: number
   watermark?: WatermarkOptions
 }
 
@@ -108,7 +109,7 @@ export interface RecentJobSummary {
   outputDirectory: string
   finishedAt: string
   inputPaths: string[]
-  request: JobRequest
+  request?: JobRequest
 }
 
 export interface JobItem {

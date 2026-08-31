@@ -210,7 +210,7 @@ function readRecentJobs(): RecentJobSummary[] {
         && typeof entry.finishedAt === 'string'
         && Array.isArray(entry.inputPaths)
         && entry.inputPaths.every(input => typeof input === 'string')
-        && isPersistedJobRequest(entry.request)
+        && (entry.request === undefined || isPersistedJobRequest(entry.request))
     }).slice(0, MAX_RECENT_JOBS)
   } catch {
     return []
@@ -288,7 +288,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const estimatedTotalSize = computed(() => activeTool.value === 'compress'
     ? files.value.reduce((sum, item) => sum + estimateCompressedSize(item.size, settings.value.quality, settings.value.targetBytes, settings.value.lossless, item.type), 0)
     : 0)
-  const isEligible = (item: QueueFile) => settings.value.recursive || !item.relativePath
+  // `recursive` controls folder expansion when files are added. Once a file
+  // is in the queue it is an explicit input, so changing the toggle must not
+  // leave a visible row that can never be processed.
+  const isEligible = (_item: QueueFile) => true
   const canProcess = computed(() => {
     const hasValidWatermark = activeTool.value !== 'watermark' || Boolean(settings.value.watermark.text.trim())
     return !running.value && hasValidWatermark && files.value.some(item => isEligible(item) && (item.status === 'queued' || item.status === 'error'))
@@ -316,11 +319,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return supportedExtension && (!file.type || file.type.startsWith('image/') || ext === '.ico' || ext === '.svg')
   }
 
-  function setTool(tool: ToolId) {
-    if (tool !== 'convert' && tool !== 'compress' && tool !== 'watermark' && tool !== 'qrcode' && tool !== 'pdf') return
+  function setTool(tool: ToolId): boolean {
+    if (tool !== 'convert' && tool !== 'compress' && tool !== 'watermark' && tool !== 'qrcode' && tool !== 'pdf') return false
+    // Keep the active queue attached to its running job. Navigation controls
+    // call this method before changing routes, so a false result also lets
+    // callers keep the user on the current workspace while processing.
+    if (running.value && tool !== activeTool.value) return false
     activeTool.value = tool
-    files.value = files.value.filter(item => activeTool.value === 'pdf' ? item.type === 'application/pdf' : item.type.startsWith('image/'))
+    if (!running.value) {
+      files.value = files.value.filter(item => activeTool.value === 'pdf' ? item.type === 'application/pdf' : item.type.startsWith('image/'))
+    }
     autoSelectTargetUnit()
+    return true
   }
 
   function addNativeFiles(selected: NativeInputFile[]) {
@@ -350,6 +360,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       let url = ''
       if (item.file) url = await withPreviewSlot(() => browserThumbnail(item.file as File))
       else if (item.path) url = await withPreviewSlot(async () => (await wailsService.previewImage(item.path as string, { maxDimension: 240 })).dataUrl ?? '')
+      // A queued preview may finish after the row was removed or reset for a
+      // retry. Avoid retaining a detached result or replacing a newer preview.
+      if (!files.value.some(entry => entry.id === item.id) || (target && item.status !== 'done')) return
       if (target) item.resultPreviewUrl = url
       else item.previewUrl = url
     } catch {
@@ -493,10 +506,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function rerunRecentJob(job: RecentJobSummary): Promise<{ ok: boolean, message?: string }> {
     if (!wailsService.isNative()) return { ok: false, message: 'desktop-only' }
-    const request = job.request
-    const inputPaths = request?.inputs?.length ? request.inputs : job.inputPaths
-    if (!request || !inputPaths?.length) return { ok: false, message: 'inputs-unavailable' }
+    const inputPaths = job.request?.inputs?.length ? job.request.inputs : job.inputPaths
+    if (!inputPaths?.length) return { ok: false, message: 'inputs-unavailable' }
     if (running.value) return { ok: false, message: 'processing' }
+
+    // Older summaries predate the persisted request snapshot. They can still
+    // be rerun with the tool's current defaults while preserving the recorded
+    // input paths and output directory.
+    const request = job.request
+      ? cloneJobRequest({ ...job.request, inputs: [...inputPaths] })
+      : { tool: job.tool, inputs: [...inputPaths], outputDirectory: job.outputDirectory }
 
     let selected: NativeInputFile[]
     try {
@@ -562,9 +581,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function process() {
     const processable = files.value.filter(item => isEligible(item) && (item.status === 'queued' || item.status === 'error'))
     if (!processable.length || running.value || (activeTool.value === 'watermark' && !settings.value.watermark.text.trim())) return
-    const requestSnapshot = cloneJobRequest(nativeRequest(processable))
     running.value = true
     cancelRequested.value = false
+    if (wailsService.isNative()) await loadDefaultOutputDirectory()
+    const requestSnapshot = cloneJobRequest(nativeRequest(processable))
     processable.forEach(item => { item.status = 'processing'; item.progress = 0; item.error = undefined })
     if (wailsService.isNative() && processable.every(item => item.path)) {
       let latestState: string
@@ -585,12 +605,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         timerRef.id = setTimeout(() => finish(false), Math.max(1, timeoutMs))
       })
       const onProgress = (status: JobProgress | JobStatus) => {
+        if (!activeJobId.value || status.id !== activeJobId.value) return
         latestState = status.state
         lastEventAt = Date.now()
         applyStatus(status)
         wakeEvent?.()
       }
       const onItem = (item: JobItem) => {
+        if (!activeJobId.value || !item.id.startsWith(`${activeJobId.value}-item-`)) return
         lastEventAt = Date.now()
         applyItem(item)
         wakeEvent?.()
@@ -658,7 +680,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       }
       item.progress = 100; item.status = 'done'
     }
-    if (cancelRequested.value) processable.filter(item => item.status === 'processing').forEach(item => { item.status = 'cancelled' })
+    if (cancelRequested.value) {
+      processable
+        .filter(item => item.status === 'processing' || item.status === 'queued')
+        .forEach(item => { item.status = 'cancelled'; item.progress = 0 })
+    }
     recordRecentJob(processable, requestSnapshot)
     running.value = false
     cancelRequested.value = false
