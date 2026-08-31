@@ -104,7 +104,7 @@ export interface RecentJobSummary {
   total: number
   completed: number
   failed: number
-  cancelled: number
+  cancelled?: number
   outputDirectory: string
   finishedAt: string
   inputPaths: string[]

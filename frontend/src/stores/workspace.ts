@@ -177,29 +177,48 @@ function cloneJobRequest(request: JobRequest): JobRequest {
   }
 }
 
+function isPersistedJobRequest(value: unknown): value is JobRequest {
+  if (!value || typeof value !== 'object') return false
+  const request = value as Partial<JobRequest>
+  return isToolId(request.tool)
+    && Array.isArray(request.inputs)
+    && request.inputs.every(input => typeof input === 'string')
+    && typeof request.outputDirectory === 'string'
+}
+
 function readRecentJobs(): RecentJobSummary[] {
   const raw = readStorage(RECENT_JOBS_STORAGE_KEY)
   if (!raw) return []
   try {
     const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return parsed.filter((value): value is RecentJobSummary => {
+    return parsed.map(value => {
+      if (!value || typeof value !== 'object') return undefined
+      const entry = value as Partial<RecentJobSummary>
+      if (entry.cancelled === undefined) return { ...entry, cancelled: 0 }
+      return value
+    }).filter((value): value is RecentJobSummary => {
       if (!value || typeof value !== 'object') return false
       const entry = value as Partial<RecentJobSummary>
       return typeof entry.id === 'string'
         && isToolId(entry.tool)
-        && Number.isFinite(entry.total)
-        && Number.isFinite(entry.completed)
-        && Number.isFinite(entry.failed)
-        && Number.isFinite(entry.cancelled)
+        && typeof entry.total === 'number' && Number.isFinite(entry.total) && entry.total >= 0
+        && typeof entry.completed === 'number' && Number.isFinite(entry.completed) && entry.completed >= 0
+        && typeof entry.failed === 'number' && Number.isFinite(entry.failed) && entry.failed >= 0
+        && typeof entry.cancelled === 'number' && Number.isFinite(entry.cancelled) && entry.cancelled >= 0
         && typeof entry.outputDirectory === 'string'
         && typeof entry.finishedAt === 'string'
         && Array.isArray(entry.inputPaths)
-        && Boolean(entry.request)
+        && entry.inputPaths.every(input => typeof input === 'string')
+        && isPersistedJobRequest(entry.request)
     }).slice(0, MAX_RECENT_JOBS)
   } catch {
     return []
   }
+}
+
+function writeRecentJobs(jobs: RecentJobSummary[]) {
+  writeStorage(RECENT_JOBS_STORAGE_KEY, JSON.stringify(jobs))
 }
 
 function readSettings(): WorkspaceSettings {
@@ -284,7 +303,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   watch(outputDir, value => writeStorage('simpletools-output', value))
   watch(settings, value => writeStorage('simpletools-settings', JSON.stringify(value)), { deep: true })
-  watch(recentJobs, value => writeStorage(RECENT_JOBS_STORAGE_KEY, JSON.stringify(value)), { deep: true })
+  watch(recentJobs, value => writeRecentJobs(value), { deep: true })
 
   function acceptsNative(file: NativeInputFile) {
     if (activeTool.value === 'pdf' ? file.kind !== 'pdf' : file.kind !== 'image') return false
@@ -424,19 +443,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       request: cloneJobRequest(request),
     }
     recentJobs.value = [summary, ...recentJobs.value.filter(item => item.id !== summary.id)].slice(0, MAX_RECENT_JOBS)
+    writeRecentJobs(recentJobs.value)
   }
 
   function removeRecentJob(jobId: string) {
     recentJobs.value = recentJobs.value.filter(item => item.id !== jobId)
+    writeRecentJobs(recentJobs.value)
   }
 
   function clearRecentJobs() {
     recentJobs.value = []
+    writeRecentJobs(recentJobs.value)
   }
 
   async function openRecentOutputDirectory(job: RecentJobSummary): Promise<{ ok: boolean, message?: string }> {
     if (!wailsService.isNative()) return { ok: false, message: 'desktop-only' }
-    const directory = job.outputDirectory.trim()
+    const directory = (job.outputDirectory || job.request?.outputDirectory || '').trim()
     if (!directory) return { ok: false, message: 'missing-output' }
     try {
       await wailsService.openOutputDirectory(directory)
@@ -472,16 +494,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function rerunRecentJob(job: RecentJobSummary): Promise<{ ok: boolean, message?: string }> {
     if (!wailsService.isNative()) return { ok: false, message: 'desktop-only' }
     const request = job.request
-    if (!request || !request.inputs.length) return { ok: false, message: 'inputs-unavailable' }
+    const inputPaths = request?.inputs?.length ? request.inputs : job.inputPaths
+    if (!request || !inputPaths?.length) return { ok: false, message: 'inputs-unavailable' }
     if (running.value) return { ok: false, message: 'processing' }
 
     let selected: NativeInputFile[]
     try {
-      selected = await wailsService.openInputFilesFromPaths(request.inputs)
+      selected = await wailsService.openInputFilesFromPaths(inputPaths)
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : 'inputs-unavailable' }
     }
     if (!selected.length) return { ok: false, message: 'inputs-unavailable' }
+    const relativeDirs = request.inputRelativeDirs ?? {}
+    selected = selected.map(file => ({ ...file, relativePath: relativeDirs[file.path] ?? file.relativePath }))
     clearFiles()
     restoreRequestSettings(request)
     addNativeFiles(selected)
@@ -592,6 +617,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
             latestState = status.state
             lastEventAt = Date.now()
             applyStatus(status)
+          }
+        }
+        // A terminal lightweight event may arrive even when an earlier item
+        // event was dropped by the bridge. Reconcile once with the complete
+        // snapshot so no row remains stuck in the processing state.
+        if (latestState !== 'queued' && latestState !== 'running') {
+          try {
+            const finalStatus = await wailsService.getJob(activeJobId.value)
+            applyStatus(finalStatus)
+          } catch {
+            // The terminal event is still useful when the job was evicted or
+            // the bridge closes during application shutdown.
           }
         }
       } catch (error) {

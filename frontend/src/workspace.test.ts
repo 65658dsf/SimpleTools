@@ -255,4 +255,23 @@ describe('recent jobs', () => {
     const result = await store.rerunRecentJob(store.recentJobs[0])
     expect(result).toEqual({ ok: false, message: 'desktop-only' })
   })
+
+  it('keeps at most twenty persisted recent jobs', () => {
+    storage.setItem('simpletools-recent-jobs', JSON.stringify(Array.from({ length: 25 }, (_, index) => ({
+      id: `job-${index}`,
+      tool: 'convert',
+      total: 1,
+      completed: 1,
+      failed: 0,
+      cancelled: 0,
+      outputDirectory: '',
+      finishedAt: new Date(index).toISOString(),
+      inputPaths: [],
+      request: { tool: 'convert', inputs: [], outputDirectory: '' },
+    }))))
+
+    const store = useWorkspaceStore()
+    expect(store.recentJobs).toHaveLength(20)
+    expect(store.recentJobs[0].id).toBe('job-0')
+  })
 })

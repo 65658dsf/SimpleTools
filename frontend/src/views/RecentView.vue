@@ -2,7 +2,19 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { AlertCircle, CheckCircle2, Clock3, FileImage, FileText, FolderOpen, Loader2, Play, QrCode, Stamp, Trash2 } from 'lucide-vue-next'
+import {
+  AlertCircle,
+  CheckCircle2,
+  Clock3,
+  FileImage,
+  FileText,
+  FolderOpen,
+  Loader2,
+  Play,
+  QrCode,
+  Stamp,
+  Trash2,
+} from 'lucide-vue-next'
 import { useWorkspaceStore } from '../stores/workspace'
 import { wailsService } from '../services/wails'
 import type { RecentJobSummary, ToolId } from '../types'
@@ -13,10 +25,13 @@ const store = useWorkspaceStore()
 const busyJobId = ref('')
 const messages = ref<Record<string, string>>({})
 
-const dateFormatter = computed(() => new Intl.DateTimeFormat(locale.value, {
-  dateStyle: 'medium',
-  timeStyle: 'short',
-}))
+const dateFormatter = computed(
+  () =>
+    new Intl.DateTimeFormat(locale.value, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }),
+)
 
 function toolIcon(tool: ToolId) {
   if (tool === 'pdf') return FileText
@@ -38,11 +53,14 @@ function countSummary(job: RecentJobSummary) {
 }
 
 function canRerun(job: RecentJobSummary) {
-  return wailsService.isNative() && Boolean(job.request?.inputs?.length)
+  return wailsService.isNative() && Boolean(job.request?.inputs?.length || job.inputPaths?.length)
 }
 
 function canOpenOutput(job: RecentJobSummary) {
-  return wailsService.isNative() && Boolean(job.outputDirectory.trim())
+  return (
+    wailsService.isNative() &&
+    Boolean((job.outputDirectory || job.request?.outputDirectory || '').trim())
+  )
 }
 
 function setMessage(jobId: string, message: string) {
@@ -57,7 +75,11 @@ async function openOutput(job: RecentJobSummary) {
   busyJobId.value = job.id
   const result = await store.openRecentOutputDirectory(job)
   busyJobId.value = ''
-  if (!result.ok) setMessage(job.id, result.message === 'desktop-only' ? t('recentOutputUnavailable') : t('recentNoOutput'))
+  if (!result.ok)
+    setMessage(
+      job.id,
+      result.message === 'desktop-only' ? t('recentOutputUnavailable') : t('recentNoOutput'),
+    )
 }
 
 async function rerun(job: RecentJobSummary) {
@@ -69,7 +91,10 @@ async function rerun(job: RecentJobSummary) {
   const result = await store.rerunRecentJob(job)
   busyJobId.value = ''
   if (!result.ok) {
-    setMessage(job.id, result.message === 'processing' ? t('recentProcessing') : t('recentRerunMissing'))
+    setMessage(
+      job.id,
+      result.message === 'processing' ? t('recentProcessing') : t('recentRerunMissing'),
+    )
     return
   }
   await router.push(`/${job.tool}`)
@@ -109,9 +134,14 @@ function remove(job: RecentJobSummary) {
             <CheckCircle2 :size="14" />
             <span>{{ countSummary(job) }}</span>
           </p>
-          <p class="recent-job-output" :title="job.outputDirectory || t('recentNoOutput')">
+          <p
+            class="recent-job-output"
+            :title="job.outputDirectory || job.request?.outputDirectory || t('recentNoOutput')"
+          >
             <FolderOpen :size="14" />
-            <span>{{ job.outputDirectory || t('recentNoOutput') }}</span>
+            <span>{{
+              job.outputDirectory || job.request?.outputDirectory || t('recentNoOutput')
+            }}</span>
           </p>
           <p v-if="!canRerun(job) && !messages[job.id]" class="recent-job-message" role="status">
             <AlertCircle :size="14" /> {{ t('recentRerunUnavailable') }}
@@ -122,15 +152,30 @@ function remove(job: RecentJobSummary) {
         </div>
       </div>
       <div class="recent-job-actions">
-        <button class="secondary-button" :disabled="busyJobId === job.id" :title="t('recentOpenFolder')" @click="openOutput(job)">
+        <button
+          class="secondary-button"
+          :disabled="busyJobId === job.id"
+          :title="t('recentOpenFolder')"
+          @click="openOutput(job)"
+        >
           <Loader2 v-if="busyJobId === job.id" class="spin" :size="15" />
           <FolderOpen v-else :size="15" />
           {{ t('recentOpenFolder') }}
         </button>
-        <button class="secondary-button" :disabled="busyJobId === job.id || !canRerun(job)" :title="t('recentRerun')" @click="rerun(job)">
+        <button
+          class="secondary-button"
+          :disabled="busyJobId === job.id || !canRerun(job)"
+          :title="t('recentRerun')"
+          @click="rerun(job)"
+        >
           <Play :size="15" /> {{ t('recentRerun') }}
         </button>
-        <button class="icon-button small" :title="t('recentDelete')" :aria-label="t('recentDelete')" @click="remove(job)">
+        <button
+          class="icon-button small"
+          :title="t('recentDelete')"
+          :aria-label="t('recentDelete')"
+          @click="remove(job)"
+        >
           <Trash2 :size="15" />
         </button>
       </div>

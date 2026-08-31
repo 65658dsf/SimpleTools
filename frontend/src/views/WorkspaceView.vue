@@ -32,6 +32,28 @@ function onInputChange(event: Event) {
 }
 function browse() { if (wailsService.isNative()) void store.browseFiles(); else input.value?.click() }
 function browseFolder() { void store.browseFolder() }
+function onKeydown(event: KeyboardEvent) {
+  const target = event.target as HTMLElement | null
+  const editing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.tagName === 'SELECT' || target?.isContentEditable
+  const modifier = event.ctrlKey || event.metaKey
+  if (event.key === 'Escape' && store.running) {
+    event.preventDefault()
+    void store.cancel()
+    return
+  }
+  if (!modifier || editing) return
+  const key = event.key.toLowerCase()
+  if (key === 'o' && event.shiftKey) {
+    event.preventDefault()
+    void store.chooseOutput()
+  } else if (key === 'o') {
+    event.preventDefault()
+    browse()
+  } else if (event.key === 'Enter') {
+    event.preventDefault()
+    void store.process()
+  }
+}
 function formatSize(bytes: number) {
   if (!Number.isFinite(bytes) || bytes < 1024) return `${Math.max(0, Math.round(bytes))} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`
@@ -50,11 +72,15 @@ function filterCount(value: QueueFilter) {
 }
 function rowIcon(type: string) { return type === 'application/pdf' ? FileText : FileImage }
 onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
   if (!wailsService.isNative()) return
   void store.loadDefaultOutputDirectory()
   OnFileDrop((_x, _y, paths) => { void store.addNativePaths(paths) }, true)
 })
-onUnmounted(() => { if (wailsService.isNative()) OnFileDropOff() })
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown)
+  if (wailsService.isNative()) OnFileDropOff()
+})
 </script>
 
 <template>
@@ -69,7 +95,7 @@ onUnmounted(() => { if (wailsService.isNative()) OnFileDropOff() })
       <div v-else-if="!store.visibleFiles.length" class="empty-state filtered-empty"><div class="empty-icon"><AlertCircle :size="20" /></div><strong>{{ t('noMatches') }}</strong><span>{{ t('noMatchesHint') }}</span></div>
       <div v-else class="file-list"><div v-for="item in store.visibleFiles" :key="item.id" class="file-row"><div class="file-type"><img v-if="item.previewUrl" :src="item.previewUrl" :alt="item.name" /><component v-else :is="rowIcon(item.type)" :size="18" /></div><div class="file-meta"><div class="file-name" :title="item.name">{{ item.name }}</div><div class="file-sub">{{ formatSize(item.size) }}<span v-if="item.status === 'done'"> · {{ item.resultName }}</span></div><div v-if="item.size >= LARGE_IMAGE_BYTES && item.status === 'queued'" class="warning-copy"><AlertCircle :size="13" /> {{ t('largeImageWarning') }}</div><div v-if="store.activeTool === 'compress' && (item.previewUrl || item.resultPreviewUrl || store.estimateForFile(item) > 0)" class="preview-strip"><div v-if="item.previewUrl" class="preview-source"><img :src="item.previewUrl" :alt="item.name" /></div><span v-else class="preview-placeholder"></span><ArrowRight :size="13" /><div class="preview-target"><img v-if="item.resultPreviewUrl" :src="item.resultPreviewUrl" :alt="item.resultName || item.name" /><span v-else class="preview-placeholder"></span><span v-if="item.status === 'done' && item.originalBytes && item.compressedBytes" class="preview-estimate actual-size">{{ compressionComparison(item) }}</span><span v-else-if="store.estimateForFile(item) > 0" class="preview-estimate">{{ t('estimatedShort') }} {{ formatSize(store.estimateForFile(item)) }}</span></div></div><div v-if="item.status === 'processing' || item.status === 'queued'" class="progress-track"><span :style="{ width: `${item.progress}%` }"></span></div><div v-if="item.status === 'error'" class="error-copy"><AlertCircle :size="13" /> {{ item.error || t('failed') }}</div><div v-if="item.status === 'cancelled'" class="cancel-copy"><CircleSlash :size="13" /> {{ t('cancelled') }}</div><div v-if="item.warning" class="warning-copy">{{ item.warning }}</div></div><div class="file-status"><Loader2 v-if="item.status === 'processing'" class="spin" :size="16" /><CheckCircle2 v-else-if="item.status === 'done'" class="success" :size="17" /><button v-else-if="item.status === 'error'" class="icon-button small" :title="t('retry')" @click="store.retry(item.id)"><RotateCcw :size="15" /></button><CircleSlash v-else-if="item.status === 'cancelled'" class="cancelled" :size="16" /><span v-else class="queue-dot"></span><button class="icon-button small remove-button" :disabled="item.status === 'processing'" :title="t('remove')" @click="store.removeFile(item.id)"><X :size="15" /></button></div></div></div>
     </section>
-    <aside class="settings-panel panel"><h2>{{ t('preferences') }}</h2><div class="field"><label>{{ t('output') }}</label><div class="directory-input"><FolderOpen :size="16" /><input v-model="store.outputDir" :placeholder="t('outputPlaceholder')" @change="store.setOutputDir(store.outputDir)" /><button :title="t('change')" @click="store.chooseOutput"><ChevronDown :size="15" /></button></div></div><div v-if="store.activeTool === 'convert'" class="field"><label>{{ t('format') }}</label><div class="segmented" role="group" :aria-label="t('format')"><button v-for="option in formatOptions" :key="option" :class="{ selected: format === option }" :aria-pressed="format === option" @click="format = option">{{ option.toUpperCase() }}</button></div></div><div v-if="store.activeTool === 'compress'" class="field"><div class="label-with-value"><label>{{ t('quality') }}</label><strong>{{ quality }}%</strong></div><input v-model.number="quality" class="range" type="range" min="10" max="100" step="1" /><div class="target-size-field"><label for="target-size-value">{{ t('targetBytes') }}</label><div class="target-size-control"><input id="target-size-value" v-model.number="store.targetValue" class="target-size-input" type="number" min="0" :step="store.targetUnit === 'B' ? 1 : 0.01" inputmode="decimal" placeholder="0" /><select v-model="store.targetUnit" class="target-size-unit" :aria-label="t('targetBytes')"><option v-for="unit in store.targetUnitOptions" :key="unit" :value="unit">{{ unit }}</option></select></div></div><label class="checkbox-row"><input v-model="store.settings.lossless" type="checkbox" /><span>{{ t('lossless') }}</span></label></div><div v-if="store.activeTool === 'pdf'" class="field"><div class="label-with-value"><label>{{ t('dpi') }}</label><strong>{{ dpi }}</strong></div><div class="segmented dpi-segmented" role="group" :aria-label="t('dpi')"><button v-for="option in dpiOptions" :key="option" :class="{ selected: dpi === option }" :aria-pressed="dpi === option" @click="dpi = option">{{ option }}</button></div><input v-model="store.settings.pageRange" class="text-input" :placeholder="t('pageRange')" /></div><div class="field option-field"><label class="checkbox-row"><input v-model="store.settings.recursive" type="checkbox" /><span>{{ t('includeSubfolders') }}</span></label><label v-if="store.activeTool !== 'pdf'" class="checkbox-row"><input v-model="store.settings.preserveMetadata" type="checkbox" /><span>{{ t('preserveMetadata') }}</span></label></div><div class="estimate"><span>{{ store.activeTool === 'compress' ? t('estimatedCompressedSize') : t('estimate') }}</span><strong>{{ store.files.length ? (store.activeTool === 'compress' ? `~${formatSize(store.estimatedTotalSize)}` : `${store.progress}%`) : '—' }}</strong></div></aside>
+    <aside class="settings-panel panel"><h2>{{ t('preferences') }}</h2><div class="field"><label>{{ t('output') }}</label><div class="directory-input"><FolderOpen :size="16" /><input v-model="store.outputDir" :placeholder="t('outputPlaceholder')" @change="store.setOutputDir(store.outputDir)" /><button class="directory-open-button" :title="t('openOutput')" :aria-label="t('openOutput')" @click="store.openOutputDirectory"><FolderOpen :size="14" /></button><button :title="t('change')" :aria-label="t('change')" @click="store.chooseOutput"><ChevronDown :size="15" /></button></div></div><div v-if="store.activeTool === 'convert'" class="field"><label>{{ t('format') }}</label><div class="segmented" role="group" :aria-label="t('format')"><button v-for="option in formatOptions" :key="option" :class="{ selected: format === option }" :aria-pressed="format === option" @click="format = option">{{ option.toUpperCase() }}</button></div></div><div v-if="store.activeTool === 'compress'" class="field"><div class="label-with-value"><label>{{ t('quality') }}</label><strong>{{ quality }}%</strong></div><input v-model.number="quality" class="range" type="range" min="10" max="100" step="1" /><div class="target-size-field"><label for="target-size-value">{{ t('targetBytes') }}</label><div class="target-size-control"><input id="target-size-value" v-model.number="store.targetValue" class="target-size-input" type="number" min="0" :step="store.targetUnit === 'B' ? 1 : 0.01" inputmode="decimal" placeholder="0" /><select v-model="store.targetUnit" class="target-size-unit" :aria-label="t('targetBytes')"><option v-for="unit in store.targetUnitOptions" :key="unit" :value="unit">{{ unit }}</option></select></div></div><label class="checkbox-row"><input v-model="store.settings.lossless" type="checkbox" /><span>{{ t('lossless') }}</span></label></div><div v-if="store.activeTool === 'pdf'" class="field"><div class="label-with-value"><label>{{ t('dpi') }}</label><strong>{{ dpi }}</strong></div><div class="segmented dpi-segmented" role="group" :aria-label="t('dpi')"><button v-for="option in dpiOptions" :key="option" :class="{ selected: dpi === option }" :aria-pressed="dpi === option" @click="dpi = option">{{ option }}</button></div><input v-model="store.settings.pageRange" class="text-input" :placeholder="t('pageRange')" /></div><div class="field option-field"><label class="checkbox-row"><input v-model="store.settings.recursive" type="checkbox" /><span>{{ t('includeSubfolders') }}</span></label><label v-if="store.activeTool !== 'pdf'" class="checkbox-row"><input v-model="store.settings.preserveMetadata" type="checkbox" /><span>{{ t('preserveMetadata') }}</span></label></div><div class="estimate"><span>{{ store.activeTool === 'compress' ? t('estimatedCompressedSize') : t('estimate') }}</span><strong>{{ store.files.length ? (store.activeTool === 'compress' ? `~${formatSize(store.estimatedTotalSize)}` : `${store.progress}%`) : '—' }}</strong></div></aside>
   </div>
   <div v-if="store.files.length" class="sticky-action-bar" role="region" :aria-label="t('processingActions')">
     <div class="sticky-summary"><strong>{{ store.files.length }}</strong> {{ t('files') }}<span> · {{ store.activeTool === 'compress' ? `~${formatSize(store.estimatedTotalSize)}` : `${store.progress}%` }}</span></div>

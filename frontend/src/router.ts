@@ -3,7 +3,7 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 export const router = createRouter({
   history: createWebHashHistory(),
   routes: [
-    { path: '/', redirect: '/convert' },
+    { path: '/', component: () => import('./views/HomeView.vue') },
     { path: '/:tool(convert|compress|pdf)', component: () => import('./views/WorkspaceView.vue') },
     { path: '/watermark', component: () => import('./views/WatermarkView.vue') },
     { path: '/qrcode', component: () => import('./views/QRCodeView.vue') },
