@@ -74,11 +74,26 @@ func TestCompressionTargetSize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := CompressImage(testImage(), FormatJPEG, 95, int64(len(data)/2), false)
+	const originalBytes = int64(4096)
+	result, err := CompressImageWithOriginal(testImage(), FormatJPEG, 95, int64(len(data)/2), false, originalBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(result.Data) == 0 || result.Quality < 1 || result.Quality > 95 {
 		t.Fatalf("unexpected result: quality=%d bytes=%d", result.Quality, len(result.Data))
+	}
+	if result.Original != originalBytes || result.Compressed != int64(len(result.Data)) {
+		t.Fatalf("unexpected byte counts: original=%d compressed=%d data=%d", result.Original, result.Compressed, len(result.Data))
+	}
+}
+
+func TestCompressionWithoutTargetReportsByteCounts(t *testing.T) {
+	const originalBytes = int64(8192)
+	result, err := CompressImageWithOriginal(testImage(), FormatPNG, 85, 0, true, originalBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Original != originalBytes || result.Compressed != int64(len(result.Data)) || result.Compressed == 0 {
+		t.Fatalf("unexpected byte counts: original=%d compressed=%d data=%d", result.Original, result.Compressed, len(result.Data))
 	}
 }

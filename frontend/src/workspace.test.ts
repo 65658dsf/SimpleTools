@@ -211,3 +211,48 @@ describe('target size units', () => {
     expect(store.settings.targetBytes).toBe(2 * 1024 * 1024)
   })
 })
+
+describe('recent jobs', () => {
+  let storage: MemoryStorage
+
+  beforeEach(() => {
+    storage = new MemoryStorage()
+    vi.stubGlobal('localStorage', storage)
+    setActivePinia(createPinia())
+  })
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('records a completed browser run and restores its summary', async () => {
+    const store = useWorkspaceStore()
+    store.setTool('compress')
+    store.addFiles([imageFile('photo.png')])
+
+    await store.process()
+    await nextTick()
+
+    expect(store.recentJobs).toHaveLength(1)
+    expect(store.recentJobs[0]).toMatchObject({
+      tool: 'compress',
+      total: 1,
+      completed: 1,
+      failed: 0,
+      cancelled: 0,
+      outputDirectory: '',
+      inputPaths: [],
+    })
+    expect(JSON.parse(storage.getItem('simpletools-recent-jobs') ?? '[]')).toHaveLength(1)
+
+    setActivePinia(createPinia())
+    expect(useWorkspaceStore().recentJobs[0].tool).toBe('compress')
+  })
+
+  it('explains when a browser-only recent job cannot be rerun', async () => {
+    const store = useWorkspaceStore()
+    store.addFiles([imageFile('photo.png')])
+    await store.process()
+
+    const result = await store.rerunRecentJob(store.recentJobs[0])
+    expect(result).toEqual({ ok: false, message: 'desktop-only' })
+  })
+})

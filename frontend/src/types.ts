@@ -77,6 +77,8 @@ export interface QueueFile {
   resultPreviewUrl?: string
   resultName?: string
   resultNames?: string[]
+  originalBytes?: number
+  compressedBytes?: number
 }
 
 export interface JobRequest {
@@ -95,6 +97,20 @@ export interface JobRequest {
   watermark?: WatermarkOptions
 }
 
+/** A lightweight, local-only record of a completed processing run. */
+export interface RecentJobSummary {
+  id: string
+  tool: ToolId
+  total: number
+  completed: number
+  failed: number
+  cancelled: number
+  outputDirectory: string
+  finishedAt: string
+  inputPaths: string[]
+  request: JobRequest
+}
+
 export interface JobItem {
   id: string
   path: string
@@ -105,6 +121,8 @@ export interface JobItem {
   outputs?: string[]
   error?: string
   warning?: string
+  originalBytes?: number
+  compressedBytes?: number
 }
 
 export interface JobStatus {
@@ -118,6 +136,20 @@ export interface JobStatus {
   error?: string
   outputs?: string[]
   items: JobItem[]
+  startedAt?: string
+  finishedAt?: string
+}
+
+export interface JobProgress {
+  id: string
+  state: string
+  total: number
+  completed: number
+  failed: number
+  progress: number
+  current?: string
+  error?: string
+  item?: JobItem
 }
 
 export interface PreviewOptions {
@@ -163,7 +195,7 @@ export interface WailsService {
 	downloadAndInstallUpdate(assetId: string): Promise<void>
 	onUpdateAvailable(listener: (info: UpdateInfo) => void): () => void
 	onUpdateProgress(listener: (progress: UpdateProgress) => void): () => void
-  onJobProgress(listener: (status: JobStatus) => void): () => void
+  onJobProgress(listener: (status: JobProgress | JobStatus) => void): () => void
   onJobItem(listener: (item: JobItem) => void): () => void
   isNative(): boolean
 }

@@ -30,6 +30,8 @@ export namespace app {
 	    outputs?: string[];
 	    error?: string;
 	    warning?: string;
+	    originalBytes?: number;
+	    compressedBytes?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new JobItem(source);
@@ -46,6 +48,8 @@ export namespace app {
 	        this.outputs = source["outputs"];
 	        this.error = source["error"];
 	        this.warning = source["warning"];
+	        this.originalBytes = source["originalBytes"];
+	        this.compressedBytes = source["compressedBytes"];
 	    }
 	}
 	export class JobStatus {
@@ -129,7 +133,7 @@ export namespace app {
 	export class PreviewOptions {
 	    maxDimension?: number;
 	    maxPixels?: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new PreviewOptions(source);
 	    }
@@ -149,11 +153,11 @@ export namespace app {
 	    text: string;
 	    textBytes: number;
 	    truncated?: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new QRCodeDecodeResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -169,11 +173,11 @@ export namespace app {
 	export class QRCodePreview {
 	    dataUrl: string;
 	    size: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new QRCodePreview(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.dataUrl = source["dataUrl"];
@@ -187,11 +191,11 @@ export namespace app {
 	    beforeDataUrl?: string;
 	    afterDataUrl?: string;
 	    truncated?: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new WatermarkPreview(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -294,11 +298,11 @@ export namespace tools {
 	    tile?: boolean;
 	    spacing?: number;
 	    shadow?: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new WatermarkOptions(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.text = source["text"];
@@ -351,7 +355,7 @@ export namespace tools {
 	        this.maxPixels = source["maxPixels"];
 	        this.watermark = this.convertValues(source["watermark"], WatermarkOptions);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -376,11 +380,11 @@ export namespace tools {
 	    errorCorrection: string;
 	    foreground: string;
 	    background: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new QRCodeOptions(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.text = source["text"];
@@ -390,4 +394,6 @@ export namespace tools {
 	        this.background = source["background"];
 	    }
 	}
+
 }
+

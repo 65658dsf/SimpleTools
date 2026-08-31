@@ -143,9 +143,11 @@ The Wails binding is the only UI/backend boundary:
   through the Wails lifecycle after the elevated installer starts, and passes its process ID so
   NSIS waits for the executable to be released before replacing it.
 
-Jobs emit `job:progress` and `job:item` snapshots while running, followed by `job:completed`; a
-batch with one or more failed items also emits `job:failed`. Update checks use `update:available`
-and `update:progress` without exposing file contents to the frontend.
+Jobs emit lightweight `job:progress` payloads (aggregate counters plus the changed item when
+available) and a single-item `job:item` event while running, followed by a complete
+`job:completed` snapshot; a batch with one or more failed items also emits `job:failed` with the
+complete terminal snapshot. `GetJob` remains the full-snapshot polling API. Update checks use
+`update:available` and `update:progress` without exposing file contents to the frontend.
 
 Go DTOs are the source of truth. TypeScript bindings are generated and checked for drift.
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/gen2brain/avif"
 	"github.com/gen2brain/webp"
+	xdraw "golang.org/x/image/draw"
 )
 
 type Format string
@@ -181,6 +183,11 @@ func EncodeBytes(img image.Image, f Format, o EncodeOptions) ([]byte, error) {
 
 const maxImageBytes = 512 << 20
 
+// DefaultImageMaxPixels bounds decoded raster allocations when callers do not
+// provide a more specific budget. It matches the native PDF safety default and
+// keeps a batch of concurrent image workers within a predictable memory range.
+const DefaultImageMaxPixels int64 = 120_000_000
+
 func flattenOnWhite(src image.Image) image.Image {
 	b := src.Bounds()
 	dst := image.NewRGBA(b)
@@ -256,13 +263,7 @@ func fitICOImage(src image.Image, maxDimension int) image.Image {
 	dw := max(1, int(float64(width)*scale))
 	dh := max(1, int(float64(height)*scale))
 	dst := image.NewRGBA(image.Rect(0, 0, dw, dh))
-	for y := 0; y < dh; y++ {
-		for x := 0; x < dw; x++ {
-			sx := b.Min.X + x*width/dw
-			sy := b.Min.Y + y*height/dh
-			dst.Set(x, y, src.At(sx, sy))
-		}
-	}
+	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, b, draw.Src, nil)
 	return dst
 }
 

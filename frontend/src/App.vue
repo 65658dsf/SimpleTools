@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Download, FileImage, FileOutput, FileText, Languages, Loader2, Moon, QrCode, Settings, Stamp, Sun, X, Zap } from 'lucide-vue-next'
+import { Clock3, Download, FileImage, FileOutput, FileText, Languages, Loader2, Moon, QrCode, Settings, Stamp, Sun, X, Zap } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from './stores/workspace'
 import type { ToolId } from './types'
 import type { UpdateInfo, UpdateProgress } from './types'
 import { wailsService } from './services/wails'
 import { initPreferences, isDark, setThemeMode } from './preferences'
+import ToolNav from './components/ToolNav.vue'
 
 const route = useRoute(); const router = useRouter(); const store = useWorkspaceStore(); const { t, locale } = useI18n()
 const dark = isDark
@@ -43,7 +44,6 @@ onMounted(() => {
 })
 onUnmounted(() => { stopUpdateAvailable(); stopUpdateProgress() })
 function navigate(id: ToolId) { store.setTool(id); router.push(`/${id}`) }
-function isToolRoute(id: ToolId) { return route.path === `/${id}` }
 function toggleTheme() { setThemeMode(dark.value ? 'light' : 'dark') }
 function toggleLocale() { locale.value = locale.value === 'en' ? 'zh' : 'en' }
 async function installUpdate() {
@@ -64,12 +64,9 @@ async function installUpdate() {
     <aside class="sidebar">
       <div class="brand"><span class="brand-mark"><Zap :size="16" /></span><span>{{ t('appName') }}</span></div>
       <div class="sidebar-section-label">{{ t('nav') }}</div>
-      <nav class="tool-nav">
-        <button v-for="tool in tools" :key="tool.id" class="tool-link" :class="{ active: isToolRoute(tool.id) }" @click="navigate(tool.id)">
-          <component :is="tool.icon" :size="18" /><span>{{ tool.label }}</span>
-        </button>
-      </nav>
+      <nav class="tool-nav"><ToolNav :items="tools" :active-path="route.path" @navigate="navigate" /></nav>
       <div class="sidebar-bottom">
+        <button class="tool-link" :class="{ active: route.path === '/recent' }" @click="router.push('/recent')"><Clock3 :size="18" /><span>{{ t('recent') }}</span></button>
         <button class="tool-link" :class="{ active: route.path === '/settings' }" @click="router.push('/settings')"><Settings :size="18" /><span>{{ t('preferences') }}</span></button>
         <div class="sidebar-note"><span class="status-dot"></span><span>{{ t('saved') }}</span></div>
       </div>
@@ -77,9 +74,8 @@ async function installUpdate() {
     <main class="main-content">
       <header class="topbar"><div class="mobile-brand"><span class="brand-mark"><Zap :size="15" /></span>{{ t('appName') }}</div><div class="topbar-actions"><button v-if="updateInfo?.available" class="update-button" :title="t('updateAvailable')" @click="installUpdate"><Loader2 v-if="updateProgress?.state === 'started'" class="spin" :size="16" /><Download v-else :size="16" /><span>{{ updateProgress?.state === 'started' ? t('updating') : `${t('updateAvailable')} · ${updateInfo.version}` }}</span></button><button class="icon-button" :title="t('language')" @click="toggleLocale"><Languages :size="18" /><span class="lang-label">{{ locale === 'en' ? '中' : 'EN' }}</span></button><button class="icon-button" :title="t('theme')" @click="toggleTheme"><Sun v-if="dark" :size="18" /><Moon v-else :size="18" /></button></div></header>
       <nav class="mobile-tool-nav" :aria-label="t('nav')">
-        <button v-for="tool in tools" :key="tool.id" class="mobile-tool-link" :class="{ active: isToolRoute(tool.id) }" @click="navigate(tool.id)">
-          <component :is="tool.icon" :size="16" /><span>{{ tool.label }}</span>
-        </button>
+        <ToolNav :items="tools" :active-path="route.path" mobile @navigate="navigate" />
+        <button class="mobile-tool-link" :class="{ active: route.path === '/recent' }" @click="router.push('/recent')"><Clock3 :size="16" /><span>{{ t('recent') }}</span></button>
         <button class="mobile-tool-link" :class="{ active: route.path === '/settings' }" @click="router.push('/settings')"><Settings :size="16" /><span>{{ t('preferences') }}</span></button>
       </nav>
       <div v-if="updateError" class="update-error" role="status"><span>{{ updateError }}</span><button class="icon-button small" :title="t('dismiss')" @click="updateError = ''"><X :size="14" /></button></div>

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -65,6 +67,243 @@ func TestStartJobConvertsPNGToJPEG(t *testing.T) {
 	}
 	if _, err = os.Stat(s.Outputs[0]); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCompressionJobReportsActualByteCounts(t *testing.T) {
+	d := t.TempDir()
+	in := filepath.Join(d, "input.png")
+	out := filepath.Join(d, "out")
+	if err := os.Mkdir(out, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := image.NewNRGBA(image.Rect(0, 0, 96, 64))
+	for y := 0; y < img.Bounds().Dy(); y++ {
+		for x := 0; x < img.Bounds().Dx(); x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: uint8(x * 2), G: uint8(y * 3), B: uint8(x + y), A: 255})
+		}
+	}
+	if err := png.Encode(f, img); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sourceInfo, err := os.Stat(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	itemEvents := make(chan JobItem, 8)
+	a := New()
+	a.setEventSink(func(name string, payload any) {
+		if name == "job:item" {
+			itemEvents <- payload.(JobItem)
+		}
+	})
+	id, err := a.StartJob(tools.JobRequest{
+		Tool:            tools.ToolCompress,
+		Inputs:          []string{in},
+		OutputDirectory: out,
+		Quality:         70,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := waitForTerminalJob(t, a, id)
+	if status.State != "completed" || len(status.Items) != 1 || len(status.Outputs) != 1 {
+		t.Fatalf("unexpected status %#v", status)
+	}
+	outputInfo, err := os.Stat(status.Outputs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := status.Items[0]
+	if item.OriginalBytes != sourceInfo.Size() || item.CompressedBytes != outputInfo.Size() {
+		t.Fatalf("unexpected job bytes: original=%d want=%d compressed=%d want=%d", item.OriginalBytes, sourceInfo.Size(), item.CompressedBytes, outputInfo.Size())
+	}
+
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case event := <-itemEvents:
+			if event.State == "completed" {
+				if event.OriginalBytes != sourceInfo.Size() || event.CompressedBytes != outputInfo.Size() {
+					t.Fatalf("unexpected event bytes: %#v", event)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("completed item event was not emitted")
+		}
+	}
+}
+
+func TestJobItemByteFieldsUseStableJSONNames(t *testing.T) {
+	encoded, err := json.Marshal(JobItem{ID: "item-1", Path: "source.png", Name: "source.png", State: "completed", OriginalBytes: 1234, CompressedBytes: 567})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["originalBytes"] != float64(1234) || payload["compressedBytes"] != float64(567) {
+		t.Fatalf("unexpected byte fields in JSON: %s", encoded)
+	}
+	if _, ok := payload["OriginalBytes"]; ok {
+		t.Fatalf("Go field name leaked into JSON: %s", encoded)
+	}
+	zeroEncoded, err := json.Marshal(JobItem{ID: "item-2", State: "queued"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(zeroEncoded), "originalBytes") || strings.Contains(string(zeroEncoded), "compressedBytes") {
+		t.Fatalf("zero byte fields should be omitted: %s", zeroEncoded)
+	}
+}
+
+func TestPruneFinishedJobsHonorsTTLAndKeepsActiveJobs(t *testing.T) {
+	a := New()
+	a.jobRetention = time.Minute
+	a.maxFinishedJobs = 50
+	finishedAt := time.Now().Add(-2 * time.Minute)
+	finished := &job{JobStatus: JobStatus{ID: "finished", State: "completed", FinishedAt: &finishedAt}}
+	activeFinishedAt := finishedAt
+	active := &job{JobStatus: JobStatus{ID: "active", State: "running", FinishedAt: &activeFinishedAt}}
+	a.jobs[finished.ID] = finished
+	a.jobs[active.ID] = active
+
+	a.pruneFinishedJobs(time.Now())
+	if _, err := a.GetJob(finished.ID); err == nil {
+		t.Fatal("expired finished job was retained")
+	}
+	if _, err := a.GetJob(active.ID); err != nil {
+		t.Fatalf("active job was pruned: %v", err)
+	}
+}
+
+func TestPruneFinishedJobsKeepsNewestFinishedJobsWithinLimit(t *testing.T) {
+	a := New()
+	a.jobRetention = time.Hour
+	a.maxFinishedJobs = 2
+	now := time.Now()
+	for i := 0; i < 3; i++ {
+		finishedAt := now.Add(time.Duration(i) * time.Second)
+		id := fmt.Sprintf("finished-%d", i)
+		a.jobs[id] = &job{JobStatus: JobStatus{ID: id, State: "completed", FinishedAt: &finishedAt}}
+	}
+	active := &job{JobStatus: JobStatus{ID: "active", State: "running"}}
+	a.jobs[active.ID] = active
+
+	a.pruneFinishedJobs(now.Add(3 * time.Second))
+	if _, err := a.GetJob("finished-0"); err == nil {
+		t.Fatal("oldest finished job was retained beyond the configured limit")
+	}
+	for _, id := range []string{"finished-1", "finished-2", active.ID} {
+		if _, err := a.GetJob(id); err != nil {
+			t.Fatalf("job %q was unexpectedly pruned: %v", id, err)
+		}
+	}
+}
+
+func TestCompletedJobIsRemovedAfterRetention(t *testing.T) {
+	d := t.TempDir()
+	in := filepath.Join(d, "input.png")
+	out := filepath.Join(d, "out")
+	if err := os.Mkdir(out, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	a := New()
+	a.jobRetention = 20 * time.Millisecond
+	id, err := a.StartJob(tools.JobRequest{Inputs: []string{in}, OutputDirectory: out, Format: "jpeg"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status := waitForTerminalJob(t, a, id); status.State != "completed" {
+		t.Fatalf("unexpected terminal state %#v", status)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := a.GetJob(id); err != nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("completed job was not removed after its retention period")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestJobProgressEventsUseLightweightPayloads(t *testing.T) {
+	d := t.TempDir()
+	in := filepath.Join(d, "input.png")
+	out := filepath.Join(d, "out")
+	if err := os.Mkdir(out, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, image.NewRGBA(image.Rect(0, 0, 4, 4))); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	progressEvents := make(chan JobProgress, 32)
+	a := New()
+	a.setEventSink(func(name string, payload any) {
+		if name != "job:progress" {
+			return
+		}
+		if progress, ok := payload.(JobProgress); ok {
+			progressEvents <- progress
+		}
+	})
+	id, err := a.StartJob(tools.JobRequest{Inputs: []string{in}, OutputDirectory: out, Format: "jpeg"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status := waitForTerminalJob(t, a, id); status.State != "completed" {
+		t.Fatalf("unexpected terminal status %#v", status)
+	}
+	foundItem := false
+	for {
+		select {
+		case progress := <-progressEvents:
+			if progress.Item != nil {
+				foundItem = true
+				if progress.Item.Path != in || progress.Total != 1 {
+					t.Fatalf("unexpected lightweight progress %#v", progress)
+				}
+			}
+		default:
+			if !foundItem {
+				t.Fatal("no changed item was included in progress events")
+			}
+			return
+		}
 	}
 }
 

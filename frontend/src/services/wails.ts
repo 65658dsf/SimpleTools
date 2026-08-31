@@ -1,4 +1,4 @@
-import type { JobItem, JobRequest, JobStatus, NativeInputFile, Preview, PreviewOptions, QRCodeDecodeResult, QRCodePreview, UpdateInfo, UpdateProgress, WailsService, WatermarkPreview } from '../types'
+import type { JobItem, JobProgress, JobStatus, NativeInputFile, Preview, PreviewOptions, QRCodeDecodeResult, QRCodePreview, UpdateInfo, UpdateProgress, WailsService, WatermarkPreview } from '../types'
 import * as App from '../../wailsjs/go/app/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import { decodeBrowserQRCode, renderBrowserQRCodePreview } from '../qrcode'
@@ -48,7 +48,7 @@ const nativeService: WailsService = {
   cancelJob: id => App.CancelJob(id),
   checkForUpdate: () => App.CheckForUpdate() as Promise<UpdateInfo>,
   downloadAndInstallUpdate: assetId => App.DownloadAndInstallUpdate(assetId),
-  onJobProgress: listener => nativeApp() ? EventsOn('job:progress', payload => listener(payload as JobStatus)) : listen<JobStatus>('job:progress', listener),
+  onJobProgress: listener => nativeApp() ? EventsOn('job:progress', payload => listener(payload as JobProgress | JobStatus)) : listen<JobProgress | JobStatus>('job:progress', listener),
   onJobItem: listener => nativeApp() ? EventsOn('job:item', payload => listener(payload as JobItem)) : listen<JobItem>('job:item', listener),
   onUpdateAvailable: listener => nativeApp() ? EventsOn('update:available', payload => listener(payload as UpdateInfo)) : listen<UpdateInfo>('update:available', listener),
   onUpdateProgress: listener => nativeApp() ? EventsOn('update:progress', payload => listener(payload as UpdateProgress)) : listen<UpdateProgress>('update:progress', listener),

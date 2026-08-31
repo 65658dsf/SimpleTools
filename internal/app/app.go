@@ -31,16 +31,18 @@ import (
 type EventSink func(name string, payload any)
 
 type App struct {
-	mu         sync.RWMutex
-	jobs       map[string]*job
-	sink       EventSink
-	ctx        context.Context
-	updater    platform.UpdateSource
-	pdfRender  tools.PDFRenderer
-	imageSlots chan struct{}
-	pdfSlots   chan struct{}
-	version    string
-	lastUpdate *UpdateInfo
+	mu              sync.RWMutex
+	jobs            map[string]*job
+	jobRetention    time.Duration
+	maxFinishedJobs int
+	sink            EventSink
+	ctx             context.Context
+	updater         platform.UpdateSource
+	pdfRender       tools.PDFRenderer
+	imageSlots      chan struct{}
+	pdfSlots        chan struct{}
+	version         string
+	lastUpdate      *UpdateInfo
 	// These hooks keep filesystem/UI side effects injectable in backend tests.
 	defaultOutputDir func() (string, error)
 	revealOutputs    func([]string) error
@@ -85,15 +87,17 @@ type QRCodePreview struct {
 }
 
 type JobItem struct {
-	ID       string   `json:"id"`
-	Path     string   `json:"path"`
-	Name     string   `json:"name"`
-	State    string   `json:"state"`
-	Progress float64  `json:"progress"`
-	Output   string   `json:"output,omitempty"`
-	Outputs  []string `json:"outputs,omitempty"`
-	Error    string   `json:"error,omitempty"`
-	Warning  string   `json:"warning,omitempty"`
+	ID              string   `json:"id"`
+	Path            string   `json:"path"`
+	Name            string   `json:"name"`
+	State           string   `json:"state"`
+	Progress        float64  `json:"progress"`
+	Output          string   `json:"output,omitempty"`
+	Outputs         []string `json:"outputs,omitempty"`
+	Error           string   `json:"error,omitempty"`
+	Warning         string   `json:"warning,omitempty"`
+	OriginalBytes   int64    `json:"originalBytes,omitempty"`
+	CompressedBytes int64    `json:"compressedBytes,omitempty"`
 }
 
 type JobStatus struct {
@@ -111,6 +115,22 @@ type JobStatus struct {
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 }
 
+// JobProgress is the lightweight progress event sent while a job is running.
+// The complete item list remains available through GetJob and terminal events;
+// emitting only aggregate counters and the changed item keeps batch updates
+// proportional to the number of changes rather than the queue size.
+type JobProgress struct {
+	ID        string   `json:"id"`
+	State     string   `json:"state"`
+	Total     int      `json:"total"`
+	Completed int      `json:"completed"`
+	Failed    int      `json:"failed"`
+	Progress  float64  `json:"progress"`
+	Current   string   `json:"current,omitempty"`
+	Error     string   `json:"error,omitempty"`
+	Item      *JobItem `json:"item,omitempty"`
+}
+
 type JobRequest = tools.JobRequest
 type UpdateInfo = platform.UpdateInfo
 
@@ -121,11 +141,13 @@ type jobInput struct {
 }
 
 type jobResult struct {
-	Index   int
-	State   string
-	Outputs []string
-	Warning string
-	Err     error
+	Index           int
+	State           string
+	Outputs         []string
+	Warning         string
+	OriginalBytes   int64
+	CompressedBytes int64
+	Err             error
 }
 
 type job struct {
@@ -133,6 +155,11 @@ type job struct {
 	cancel context.CancelFunc
 	inputs []jobInput
 }
+
+const (
+	defaultJobRetention    = 5 * time.Minute
+	defaultMaxFinishedJobs = 50
+)
 
 type outputAllocator struct {
 	mu          sync.Mutex
@@ -214,6 +241,8 @@ func New(versions ...string) *App {
 	}
 	return &App{
 		jobs:            map[string]*job{},
+		jobRetention:    defaultJobRetention,
+		maxFinishedJobs: defaultMaxFinishedJobs,
 		updater:         updater,
 		pdfRender:       tools.DefaultPDFRenderer(),
 		imageSlots:      make(chan struct{}, 4),
@@ -455,7 +484,11 @@ func (a *App) PreviewImage(path string, options PreviewOptions) (*Preview, error
 	if err != nil {
 		return nil, fmt.Errorf("decode image configuration: %w", err)
 	}
-	if err := validateImageDimensions(config.Width, config.Height, options.MaxPixels); err != nil {
+	maxPixels := options.MaxPixels
+	if maxPixels <= 0 {
+		maxPixels = tools.DefaultImageMaxPixels
+	}
+	if err := validateImageDimensions(config.Width, config.Height, maxPixels); err != nil {
 		return nil, err
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
@@ -500,7 +533,18 @@ func (a *App) PreviewWatermark(path string, watermark tools.WatermarkOptions, ma
 		return nil, err
 	}
 	defer f.Close()
-	img, err := tools.Decode(f, filepath.Ext(path))
+	ext := filepath.Ext(path)
+	config, err := tools.DecodeConfig(f, ext)
+	if err != nil {
+		return nil, fmt.Errorf("decode image configuration: %w", err)
+	}
+	if err := validateImageDimensions(config.Width, config.Height, tools.DefaultImageMaxPixels); err != nil {
+		return nil, err
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("rewind image: %w", err)
+	}
+	img, err := tools.Decode(f, ext)
 	if err != nil {
 		return nil, err
 	}
@@ -906,7 +950,15 @@ func (a *App) run(ctx context.Context, j *job, req tools.JobRequest, format tool
 			defer workers.Done()
 			for index := range tasks {
 				result := a.processOne(ctx, j, j.inputs[index], req, format, allocator)
-				results <- jobResult{Index: index, State: result.state, Outputs: result.outputs, Warning: result.warning, Err: result.err}
+				results <- jobResult{
+					Index:           index,
+					State:           result.state,
+					Outputs:         result.outputs,
+					Warning:         result.warning,
+					OriginalBytes:   result.originalBytes,
+					CompressedBytes: result.compressedBytes,
+					Err:             result.err,
+				}
 			}
 		}()
 	}
@@ -946,6 +998,10 @@ func (a *App) run(ctx context.Context, j *job, req tools.JobRequest, format tool
 		})
 	}
 	a.finish(j)
+	// The worker inputs duplicate paths and folder metadata that are no longer
+	// needed once every result has been applied. Keep the public JobStatus items
+	// intact for GetJob callers until the normal retention policy expires it.
+	a.releaseJobInputs(j)
 	status := a.snapshot(j)
 	if status.State != "cancelled" {
 		a.revealJobOutputs(status.Outputs)
@@ -954,13 +1010,20 @@ func (a *App) run(ctx context.Context, j *job, req tools.JobRequest, format tool
 	if status.Failed > 0 {
 		a.emit("job:failed", status)
 	}
+	// Publish the terminal events before pruning so listeners can always consume
+	// a complete final snapshot. The timer captures only App, avoiding retention
+	// of a potentially large job object after it has been evicted.
+	a.scheduleJobPrune()
+	a.pruneFinishedJobs(time.Now())
 }
 
 type processed struct {
-	state   string
-	outputs []string
-	warning string
-	err     error
+	state           string
+	outputs         []string
+	warning         string
+	originalBytes   int64
+	compressedBytes int64
+	err             error
 }
 
 func (a *App) processOne(ctx context.Context, j *job, input jobInput, req tools.JobRequest, format tools.Format, allocator *outputAllocator) processed {
@@ -981,7 +1044,27 @@ func (a *App) processOne(ctx context.Context, j *job, input jobInput, req tools.
 		return processed{state: "failed", err: err}
 	}
 	defer src.Close()
-	img, err := tools.Decode(src, filepath.Ext(input.Path))
+	var originalBytes int64
+	if info, statErr := src.Stat(); statErr == nil {
+		originalBytes = info.Size()
+	}
+	inputExt := filepath.Ext(input.Path)
+	config, err := tools.DecodeConfig(src, inputExt)
+	if err != nil {
+		return processed{state: "failed", err: fmt.Errorf("decode image configuration: %w", err)}
+	}
+	maxPixels := req.MaxPixels
+	if maxPixels <= 0 {
+		maxPixels = tools.DefaultImageMaxPixels
+	}
+	if err := validateImageDimensions(config.Width, config.Height, maxPixels); err != nil {
+		return processed{state: "failed", err: err}
+	}
+	// DecodeConfig consumed the reader; rewind before allocating the full image.
+	if _, err := src.Seek(0, io.SeekStart); err != nil {
+		return processed{state: "failed", err: fmt.Errorf("rewind image: %w", err)}
+	}
+	img, err := tools.Decode(src, inputExt)
 	if err != nil {
 		return processed{state: "failed", err: err}
 	}
@@ -1011,11 +1094,13 @@ func (a *App) processOne(ctx context.Context, j *job, input jobInput, req tools.
 	}
 	var data []byte
 	if req.ToolKind() == tools.ToolCompress {
-		compressed, compressErr := tools.CompressImage(img, outputFormat, req.Quality, req.TargetBytes, req.Lossless)
+		compressed, compressErr := tools.CompressImageWithOriginal(img, outputFormat, req.Quality, req.TargetBytes, req.Lossless, originalBytes)
 		if compressErr != nil {
 			return processed{state: "failed", err: compressErr}
 		}
 		data, result.warning = compressed.Data, joinWarnings(result.warning, compressed.Warning)
+		result.originalBytes = compressed.Original
+		result.compressedBytes = compressed.Compressed
 	} else {
 		if req.ToolKind() == tools.ToolWatermark {
 			img, err = tools.ApplyTextWatermark(img, *req.Watermark)
@@ -1150,6 +1235,8 @@ func (a *App) applyResult(j *job, result jobResult) {
 	if result.Warning != "" {
 		item.Warning = result.Warning
 	}
+	item.OriginalBytes = result.OriginalBytes
+	item.CompressedBytes = result.CompressedBytes
 	if result.Err != nil && !errors.Is(result.Err, context.Canceled) {
 		item.Error = result.Err.Error()
 	}
@@ -1164,12 +1251,10 @@ func (a *App) applyResult(j *job, result jobResult) {
 	j.Progress = float64(j.Completed+j.Failed) / float64(max(1, j.Total))
 	j.Current = ""
 	itemSnapshot := *item
-	snapshot := j.JobStatus
-	snapshot.Items = cloneJobItems(j.Items)
-	snapshot.Outputs = append([]string(nil), j.Outputs...)
+	progress := lightweightJobProgress(j.JobStatus, &itemSnapshot)
 	a.mu.Unlock()
 	a.emit("job:item", itemSnapshot)
-	a.emit("job:progress", snapshot)
+	a.emit("job:progress", progress)
 }
 
 func (a *App) updateItem(j *job, path, state string, progress float64, output, errText string) {
@@ -1182,10 +1267,10 @@ func (a *App) updateItem(j *job, path, state string, progress float64, output, e
 			j.Items[i].Error = errText
 			j.Current = path
 			item := j.Items[i]
-			snapshot := cloneJobStatus(j.JobStatus)
+			progress := lightweightJobProgress(j.JobStatus, &item)
 			a.mu.Unlock()
 			a.emit("job:item", item)
-			a.emit("job:progress", snapshot)
+			a.emit("job:progress", progress)
 			return
 		}
 	}
@@ -1195,14 +1280,80 @@ func (a *App) updateItem(j *job, path, state string, progress float64, output, e
 func (a *App) update(j *job, fn func(*JobStatus)) {
 	a.mu.Lock()
 	fn(&j.JobStatus)
-	snapshot := cloneJobStatus(j.JobStatus)
+	progress := lightweightJobProgress(j.JobStatus, nil)
 	a.mu.Unlock()
-	a.emit("job:progress", snapshot)
+	a.emit("job:progress", progress)
 }
 
 func (a *App) finish(j *job) {
 	now := time.Now()
 	a.update(j, func(s *JobStatus) { s.FinishedAt = &now; s.Current = "" })
+}
+
+// releaseJobInputs drops the worker-only input metadata after all workers have
+// joined. The public JobStatus snapshot remains intact for the retention
+// window, so GetJob and terminal events keep their existing contract.
+func (a *App) releaseJobInputs(j *job) {
+	a.mu.Lock()
+	j.inputs = nil
+	a.mu.Unlock()
+}
+
+func (a *App) scheduleJobPrune() {
+	a.mu.RLock()
+	retention := a.jobRetention
+	a.mu.RUnlock()
+	if retention <= 0 {
+		retention = defaultJobRetention
+	}
+	time.AfterFunc(retention, func() {
+		a.pruneFinishedJobs(time.Now())
+	})
+}
+
+// pruneFinishedJobs bounds the in-memory job registry without touching active
+// jobs. It is intentionally callable with a supplied clock so tests can cover
+// TTL and capacity behavior without sleeping for the production retention.
+func (a *App) pruneFinishedJobs(now time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	retention := a.jobRetention
+	if retention <= 0 {
+		retention = defaultJobRetention
+	}
+	maxFinished := a.maxFinishedJobs
+	if maxFinished <= 0 {
+		maxFinished = defaultMaxFinishedJobs
+	}
+
+	finished := make([]*job, 0, len(a.jobs))
+	cutoff := now.Add(-retention)
+	for id, candidate := range a.jobs {
+		if candidate.FinishedAt == nil || candidate.State == "queued" || candidate.State == "running" {
+			continue
+		}
+		if !candidate.FinishedAt.After(cutoff) {
+			delete(a.jobs, id)
+			continue
+		}
+		finished = append(finished, candidate)
+	}
+	if len(finished) <= maxFinished {
+		return
+	}
+	sort.SliceStable(finished, func(i, j int) bool {
+		if finished[i].FinishedAt.Equal(*finished[j].FinishedAt) {
+			return finished[i].ID < finished[j].ID
+		}
+		return finished[i].FinishedAt.Before(*finished[j].FinishedAt)
+	})
+	for _, candidate := range finished[:len(finished)-maxFinished] {
+		// Delete by identity so a future job with a reused ID cannot be removed
+		// by a stale timer or an older pruning pass.
+		if current, ok := a.jobs[candidate.ID]; ok && current == candidate {
+			delete(a.jobs, candidate.ID)
+		}
+	}
 }
 
 func cloneJobItems(items []JobItem) []JobItem {
@@ -1220,7 +1371,30 @@ func cloneJobItems(items []JobItem) []JobItem {
 func cloneJobStatus(status JobStatus) JobStatus {
 	status.Items = cloneJobItems(status.Items)
 	status.Outputs = append([]string(nil), status.Outputs...)
+	if status.FinishedAt != nil {
+		finishedAt := *status.FinishedAt
+		status.FinishedAt = &finishedAt
+	}
 	return status
+}
+
+func lightweightJobProgress(status JobStatus, item *JobItem) JobProgress {
+	progress := JobProgress{
+		ID:        status.ID,
+		State:     status.State,
+		Total:     status.Total,
+		Completed: status.Completed,
+		Failed:    status.Failed,
+		Progress:  status.Progress,
+		Current:   status.Current,
+		Error:     status.Error,
+	}
+	if item != nil {
+		copyItem := *item
+		copyItem.Outputs = append([]string(nil), item.Outputs...)
+		progress.Item = &copyItem
+	}
+	return progress
 }
 
 func (a *App) snapshot(j *job) JobStatus {
@@ -1232,11 +1406,12 @@ func (a *App) snapshot(j *job) JobStatus {
 func (a *App) GetJob(id string) (*JobStatus, error) {
 	a.mu.RLock()
 	j, ok := a.jobs[id]
-	a.mu.RUnlock()
 	if !ok {
+		a.mu.RUnlock()
 		return nil, fmt.Errorf("job %q not found", id)
 	}
-	snapshot := a.snapshot(j)
+	snapshot := cloneJobStatus(j.JobStatus)
+	a.mu.RUnlock()
 	return &snapshot, nil
 }
 

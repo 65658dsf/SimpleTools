@@ -1,6 +1,6 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
-import type { JobItem, JobRequest, JobStatus, NativeInputFile, QueueFile, ToolId, WatermarkOptions } from '../types'
+import type { JobItem, JobProgress, JobRequest, JobStatus, NativeInputFile, QueueFile, RecentJobSummary, ToolId, WatermarkOptions } from '../types'
 import { wailsService } from '../services/wails'
 import { DEFAULT_QR_CODE, normalizeQRCodeSettings, type QRCodeSettings } from '../qrcode'
 import { DEFAULT_WATERMARK, normalizeWatermarkOptions } from '../watermark'
@@ -21,6 +21,7 @@ const FORMAT_OPTIONS = ['webp', 'jpg', 'png', 'avif', 'ico', 'svg'] as const
 const DPI_OPTIONS = [72, 150, 300, 600] as const
 export const TARGET_BYTES_UNITS = ['B', 'KB', 'MB', 'GB'] as const
 export type TargetBytesUnit = typeof TARGET_BYTES_UNITS[number]
+export type QueueFilter = 'all' | 'queued' | 'processing' | 'done' | 'error'
 
 const BYTES_PER_TARGET_UNIT: Record<TargetBytesUnit, number> = {
   B: 1,
@@ -30,6 +31,25 @@ const BYTES_PER_TARGET_UNIT: Record<TargetBytesUnit, number> = {
 }
 
 const MAX_TARGET_BYTES = Number.MAX_SAFE_INTEGER
+const PREVIEW_CONCURRENCY = 4
+let activePreviewTasks = 0
+const queuedPreviewTasks: Array<() => void> = []
+
+// Native thumbnail decoding allocates image buffers in Go. Keep a small,
+// process-wide queue so dropping a large folder does not create one IPC call
+// and one pixel allocation per file at the same time.
+async function withPreviewSlot<Result>(task: () => Promise<Result>): Promise<Result> {
+  if (activePreviewTasks >= PREVIEW_CONCURRENCY) {
+    await new Promise<void>(resolve => queuedPreviewTasks.push(resolve))
+  }
+  activePreviewTasks += 1
+  try {
+    return await task()
+  } finally {
+    activePreviewTasks -= 1
+    queuedPreviewTasks.shift()?.()
+  }
+}
 
 type WorkspaceSettings = {
   format: string
@@ -140,6 +160,48 @@ function writeStorage(key: string, value: string) {
   }
 }
 
+const RECENT_JOBS_STORAGE_KEY = 'simpletools-recent-jobs'
+const MAX_RECENT_JOBS = 20
+const TOOL_IDS: ToolId[] = ['convert', 'compress', 'watermark', 'qrcode', 'pdf']
+
+function isToolId(value: unknown): value is ToolId {
+  return typeof value === 'string' && TOOL_IDS.includes(value as ToolId)
+}
+
+function cloneJobRequest(request: JobRequest): JobRequest {
+  return {
+    ...request,
+    inputs: [...request.inputs],
+    inputRelativeDirs: request.inputRelativeDirs ? { ...request.inputRelativeDirs } : undefined,
+    watermark: request.watermark ? { ...request.watermark } : undefined,
+  }
+}
+
+function readRecentJobs(): RecentJobSummary[] {
+  const raw = readStorage(RECENT_JOBS_STORAGE_KEY)
+  if (!raw) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((value): value is RecentJobSummary => {
+      if (!value || typeof value !== 'object') return false
+      const entry = value as Partial<RecentJobSummary>
+      return typeof entry.id === 'string'
+        && isToolId(entry.tool)
+        && Number.isFinite(entry.total)
+        && Number.isFinite(entry.completed)
+        && Number.isFinite(entry.failed)
+        && Number.isFinite(entry.cancelled)
+        && typeof entry.outputDirectory === 'string'
+        && typeof entry.finishedAt === 'string'
+        && Array.isArray(entry.inputPaths)
+        && Boolean(entry.request)
+    }).slice(0, MAX_RECENT_JOBS)
+  } catch {
+    return []
+  }
+}
+
 function readSettings(): WorkspaceSettings {
   const raw = readStorage('simpletools-settings')
   if (!raw) return defaultSettings()
@@ -178,10 +240,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const activeJobId = ref<string>()
   const settings = ref<WorkspaceSettings>(readSettings())
   const cancelRequested = ref(false)
+  const queueFilter = ref<QueueFilter>('all')
+  const recentJobs = ref<RecentJobSummary[]>(readRecentJobs())
   let stopProgress: () => void = () => undefined
   let stopItems: () => void = () => undefined
 
   const completeCount = computed(() => files.value.filter(item => item.status === 'done').length)
+  const visibleFiles = computed(() => queueFilter.value === 'all'
+    ? files.value
+    : files.value.filter(item => item.status === queueFilter.value))
   const progress = computed(() => files.value.length ? Math.round(files.value.reduce((sum, item) => sum + item.progress, 0) / files.value.length) : 0)
   const targetUnit = computed<TargetBytesUnit>({
     get: () => settings.value.targetBytesUnit,
@@ -217,6 +284,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   watch(outputDir, value => writeStorage('simpletools-output', value))
   watch(settings, value => writeStorage('simpletools-settings', JSON.stringify(value)), { deep: true })
+  watch(recentJobs, value => writeStorage(RECENT_JOBS_STORAGE_KEY, JSON.stringify(value)), { deep: true })
 
   function acceptsNative(file: NativeInputFile) {
     if (activeTool.value === 'pdf' ? file.kind !== 'pdf' : file.kind !== 'image') return false
@@ -261,8 +329,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function loadPreview(item: QueueFile, target = false) {
     try {
       let url = ''
-      if (item.file) url = await browserThumbnail(item.file)
-      else if (item.path) url = (await wailsService.previewImage(item.path, { maxDimension: 240 })).dataUrl ?? ''
+      if (item.file) url = await withPreviewSlot(() => browserThumbnail(item.file as File))
+      else if (item.path) url = await withPreviewSlot(async () => (await wailsService.previewImage(item.path as string, { maxDimension: 240 })).dataUrl ?? '')
       if (target) item.resultPreviewUrl = url
       else item.previewUrl = url
     } catch {
@@ -340,12 +408,112 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (outputDir.value.trim()) await wailsService.openOutputDirectory(outputDir.value)
   }
 
+  function recordRecentJob(processed: QueueFile[], request: JobRequest) {
+    const terminal = processed.filter(item => item.status === 'done' || item.status === 'error' || item.status === 'cancelled')
+    if (!terminal.length) return
+    const summary: RecentJobSummary = {
+      id: id(),
+      tool: request.tool,
+      total: processed.length,
+      completed: terminal.filter(item => item.status === 'done').length,
+      failed: terminal.filter(item => item.status === 'error').length,
+      cancelled: terminal.filter(item => item.status === 'cancelled').length,
+      outputDirectory: request.outputDirectory,
+      finishedAt: new Date().toISOString(),
+      inputPaths: [...request.inputs],
+      request: cloneJobRequest(request),
+    }
+    recentJobs.value = [summary, ...recentJobs.value.filter(item => item.id !== summary.id)].slice(0, MAX_RECENT_JOBS)
+  }
+
+  function removeRecentJob(jobId: string) {
+    recentJobs.value = recentJobs.value.filter(item => item.id !== jobId)
+  }
+
+  function clearRecentJobs() {
+    recentJobs.value = []
+  }
+
+  async function openRecentOutputDirectory(job: RecentJobSummary): Promise<{ ok: boolean, message?: string }> {
+    if (!wailsService.isNative()) return { ok: false, message: 'desktop-only' }
+    const directory = job.outputDirectory.trim()
+    if (!directory) return { ok: false, message: 'missing-output' }
+    try {
+      await wailsService.openOutputDirectory(directory)
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'open-failed' }
+    }
+  }
+
+  function restoreRequestSettings(request: JobRequest) {
+    setTool(request.tool)
+    if (request.outputDirectory !== undefined) outputDir.value = request.outputDirectory
+    if (request.format !== undefined) settings.value.format = request.format
+    if (request.quality !== undefined) settings.value.quality = request.quality
+    if (request.tool === 'compress') {
+      if (request.targetBytes !== undefined) {
+        settings.value.targetBytes = request.targetBytes
+        settings.value.targetBytesUnit = targetUnitForBytes(request.targetBytes)
+        settings.value.targetBytesUnitAuto = false
+      } else {
+        settings.value.targetBytes = 0
+        settings.value.targetBytesUnitAuto = true
+      }
+    }
+    if (request.lossless !== undefined) settings.value.lossless = request.lossless
+    if (request.preserveMetadata !== undefined) settings.value.preserveMetadata = request.preserveMetadata
+    if (request.recursive !== undefined) settings.value.recursive = request.recursive
+    if (request.dpi !== undefined) settings.value.dpi = request.dpi
+    if (request.pageRange !== undefined) settings.value.pageRange = request.pageRange
+    if (request.watermark) settings.value.watermark = normalizeWatermarkOptions(request.watermark)
+  }
+
+  async function rerunRecentJob(job: RecentJobSummary): Promise<{ ok: boolean, message?: string }> {
+    if (!wailsService.isNative()) return { ok: false, message: 'desktop-only' }
+    const request = job.request
+    if (!request || !request.inputs.length) return { ok: false, message: 'inputs-unavailable' }
+    if (running.value) return { ok: false, message: 'processing' }
+
+    let selected: NativeInputFile[]
+    try {
+      selected = await wailsService.openInputFilesFromPaths(request.inputs)
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'inputs-unavailable' }
+    }
+    if (!selected.length) return { ok: false, message: 'inputs-unavailable' }
+    clearFiles()
+    restoreRequestSettings(request)
+    addNativeFiles(selected)
+    if (!files.value.length) return { ok: false, message: 'inputs-unavailable' }
+    void process()
+    return { ok: true }
+  }
+
   function removeFile(fileId: string) { const item = files.value.find(entry => entry.id === fileId); if (!item || item.status === 'processing') return; releasePreview(item); files.value = files.value.filter(entry => entry.id !== fileId); autoSelectTargetUnit() }
   function clearFiles() { if (running.value) return; files.value.forEach(releasePreview); files.value = []; autoSelectTargetUnit() }
-  function retry(fileId: string) { const item = files.value.find(entry => entry.id === fileId); if (item) { releaseResultPreview(item); item.status = 'queued'; item.progress = 0; item.error = undefined; item.warning = undefined; item.resultName = undefined; item.resultNames = undefined; item.resultPreviewUrl = undefined } }
+  function resetForRetry(item: QueueFile) {
+    releaseResultPreview(item)
+    item.status = 'queued'
+    item.progress = 0
+    item.error = undefined
+    item.warning = undefined
+    item.resultName = undefined
+    item.resultNames = undefined
+    item.resultPreviewUrl = undefined
+    item.originalBytes = undefined
+    item.compressedBytes = undefined
+  }
+  function retry(fileId: string) { const item = files.value.find(entry => entry.id === fileId); if (item) resetForRetry(item) }
+  function retryFailed() { if (running.value) return; files.value.filter(item => item.status === 'error').forEach(resetForRetry) }
+  function clearCompleted() { if (running.value) return; files.value.filter(item => item.status === 'done').forEach(releasePreview); files.value = files.value.filter(item => item.status !== 'done'); autoSelectTargetUnit() }
   function setOutputDir(dir: string) { outputDir.value = dir }
   function estimateForFile(item: QueueFile) {
     return estimateCompressedSize(item.size, settings.value.quality, settings.value.targetBytes, settings.value.lossless, item.type)
+  }
+  function compressionSavings(item: QueueFile): number | undefined {
+    if (item.originalBytes === undefined || item.compressedBytes === undefined || item.originalBytes <= 0) return undefined
+    return Math.round((1 - item.compressedBytes / item.originalBytes) * 100)
   }
 
   function nativeRequest(source = files.value.filter(item => item.status === 'queued' || item.status === 'error')): JobRequest {
@@ -369,28 +537,69 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function process() {
     const processable = files.value.filter(item => isEligible(item) && (item.status === 'queued' || item.status === 'error'))
     if (!processable.length || running.value || (activeTool.value === 'watermark' && !settings.value.watermark.text.trim())) return
+    const requestSnapshot = cloneJobRequest(nativeRequest(processable))
     running.value = true
     cancelRequested.value = false
     processable.forEach(item => { item.status = 'processing'; item.progress = 0; item.error = undefined })
     if (wailsService.isNative() && processable.every(item => item.path)) {
+      let latestState: string
+      let lastEventAt: number
+      let wakeEvent: (() => void) | undefined
+      const waitForNativeEvent = (timeoutMs: number) => new Promise<boolean>(resolve => {
+        let settled = false
+        const timerRef: { id?: ReturnType<typeof setTimeout> } = {}
+        const finish = (eventReceived: boolean) => {
+          if (settled) return
+          settled = true
+          if (timerRef.id !== undefined) clearTimeout(timerRef.id)
+          if (wakeEvent === notify) wakeEvent = undefined
+          resolve(eventReceived)
+        }
+        const notify = () => finish(true)
+        wakeEvent = notify
+        timerRef.id = setTimeout(() => finish(false), Math.max(1, timeoutMs))
+      })
+      const onProgress = (status: JobProgress | JobStatus) => {
+        latestState = status.state
+        lastEventAt = Date.now()
+        applyStatus(status)
+        wakeEvent?.()
+      }
+      const onItem = (item: JobItem) => {
+        lastEventAt = Date.now()
+        applyItem(item)
+        wakeEvent?.()
+      }
       try {
-        stopProgress = wailsService.onJobProgress(applyStatus)
-        stopItems = wailsService.onJobItem(applyItem)
-        activeJobId.value = await wailsService.startJob(nativeRequest(processable))
+        stopProgress = wailsService.onJobProgress(onProgress)
+        stopItems = wailsService.onJobItem(onItem)
+        activeJobId.value = await wailsService.startJob(requestSnapshot)
         if (cancelRequested.value) {
           try { await wailsService.cancelJob(activeJobId.value) } catch { /* status polling still determines the final state */ }
         }
         let status = await wailsService.getJob(activeJobId.value)
-        while (status.state === 'queued' || status.state === 'running') {
-          await new Promise(resolve => setTimeout(resolve, 150))
-          status = await wailsService.getJob(activeJobId.value)
-        }
+        latestState = status.state
+        lastEventAt = Date.now()
         applyStatus(status)
+        while (latestState === 'queued' || latestState === 'running') {
+          const eventReceived = await waitForNativeEvent(Math.max(1, 5000 - (Date.now() - lastEventAt)))
+          if (latestState !== 'queued' && latestState !== 'running') break
+          if (!eventReceived) {
+            // Events are authoritative during normal processing. A single
+            // five-second watchdog poll recovers from a dropped event without
+            // producing a continuous IPC stream for every file update.
+            status = await wailsService.getJob(activeJobId.value)
+            latestState = status.state
+            lastEventAt = Date.now()
+            applyStatus(status)
+          }
+        }
       } catch (error) {
         files.value.forEach(item => { if (item.status === 'processing') { item.status = 'error'; item.error = error instanceof Error ? error.message : 'Processing failed' } })
       } finally {
         stopProgress(); stopItems(); stopProgress = () => undefined; stopItems = () => undefined; activeJobId.value = undefined; running.value = false
         cancelRequested.value = false
+        recordRecentJob(processable, requestSnapshot)
       }
       return
     }
@@ -406,9 +615,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         break
       }
       item.resultName = activeTool.value === 'pdf' ? `${stripExtension(item.name)}-page-001.png` : activeTool.value === 'compress' ? `${stripExtension(item.name)}-compressed${extension(item.name)}` : activeTool.value === 'watermark' ? `${stripExtension(item.name)}-watermarked${extension(item.name)}` : `${stripExtension(item.name)}.${settings.value.format}`
+      if (activeTool.value === 'compress') {
+        item.originalBytes = item.size
+        item.compressedBytes = estimateForFile(item)
+      }
       item.progress = 100; item.status = 'done'
     }
     if (cancelRequested.value) processable.filter(item => item.status === 'processing').forEach(item => { item.status = 'cancelled' })
+    recordRecentJob(processable, requestSnapshot)
     running.value = false
     cancelRequested.value = false
   }
@@ -421,8 +635,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  function applyStatus(status: JobStatus) {
-    status.items?.forEach(applyItem)
+  function applyStatus(status: JobProgress | JobStatus) {
+    if ('items' in status) status.items?.forEach(applyItem)
+    if ('item' in status && status.item) applyItem(status.item)
     files.value.forEach(item => {
       if (item.path && status.current === item.path && item.status === 'queued') item.status = 'processing'
     })
@@ -442,6 +657,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     else target.status = 'processing'
     target.error = item.error
     target.warning = item.warning
+    target.originalBytes = item.originalBytes
+    target.compressedBytes = item.compressedBytes
     target.resultName = item.output?.split(/[\\/]/).pop()
     target.resultNames = item.outputs
     if (item.output && activeTool.value !== 'pdf') void loadPreview(target, true)
@@ -449,5 +666,5 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function simulateProgress(item: QueueFile) { for (const value of [20, 45, 70, 90]) { await new Promise(resolve => setTimeout(resolve, 100)); if (cancelRequested.value) return false; item.progress = value } return true }
 
-  return { activeTool, files, outputDir, running, settings, targetValue, targetUnit, targetUnitOptions: TARGET_BYTES_UNITS, completeCount, progress, estimatedTotalSize, canProcess, setTool, addFiles, addNativeFiles, addNativePaths, browseFiles, browseFolder, chooseOutput, loadDefaultOutputDirectory, openOutputDirectory, removeFile, clearFiles, process, cancel, retry, setOutputDir, estimateForFile }
+  return { activeTool, files, visibleFiles, queueFilter, recentJobs, outputDir, running, settings, targetValue, targetUnit, targetUnitOptions: TARGET_BYTES_UNITS, completeCount, progress, estimatedTotalSize, canProcess, setTool, addFiles, addNativeFiles, addNativePaths, browseFiles, browseFolder, chooseOutput, loadDefaultOutputDirectory, openOutputDirectory, openRecentOutputDirectory, removeRecentJob, clearRecentJobs, rerunRecentJob, removeFile, clearFiles, retry, retryFailed, clearCompleted, process, cancel, setOutputDir, estimateForFile, compressionSavings }
 })
