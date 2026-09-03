@@ -21,6 +21,10 @@ function openTool(tool: ToolId) {
   if (!store.setTool(tool)) return
   void router.push(`/${tool}`)
 }
+
+function canOpenTool(tool: ToolId) {
+  return !store.running || tool === store.activeTool
+}
 </script>
 
 <template>
@@ -39,7 +43,7 @@ function openTool(tool: ToolId) {
       <div class="home-tool-copy">
         <h2>{{ tool.title }}</h2>
         <p>{{ tool.detail }}</p>
-        <button class="secondary-button home-tool-button" @click="openTool(tool.id)"><span>{{ t('openTool') }}</span>
+        <button class="secondary-button home-tool-button" :disabled="!canOpenTool(tool.id)" @click="openTool(tool.id)"><span>{{ t('openTool') }}</span>
           <ArrowRight :size="15" />
         </button>
       </div>

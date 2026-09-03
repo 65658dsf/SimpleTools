@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Clock3, Download, FileImage, FileOutput, FileText, Languages, Loader2, Moon, QrCode, Settings, Stamp, Sun, X, Zap } from 'lucide-vue-next'
+import { Clock3, Download, Languages, Loader2, Moon, Settings, Sun, X, Zap } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from './stores/workspace'
 import type { ToolId } from './types'
 import type { UpdateInfo, UpdateProgress } from './types'
 import { wailsService } from './services/wails'
 import { initPreferences, isDark, setThemeMode } from './preferences'
-import ToolNav from './components/ToolNav.vue'
+import HomeButton from './components/HomeButton.vue'
 
 const route = useRoute(); const router = useRouter(); const store = useWorkspaceStore(); const { t, locale } = useI18n()
 const dark = isDark
@@ -19,15 +19,12 @@ const lastToolPath = ref('')
 const updateError = ref('')
 let stopUpdateAvailable: () => void = () => undefined
 let stopUpdateProgress: () => void = () => undefined
-const tools = computed(() => [
-  { id: 'convert' as ToolId, icon: FileOutput, label: t('convert'), detail: t('convertDesc') },
-  { id: 'compress' as ToolId, icon: FileImage, label: t('compress'), detail: t('compressDesc') },
-  { id: 'watermark' as ToolId, icon: Stamp, label: t('watermark'), detail: t('watermarkDesc') },
-  { id: 'qrcode' as ToolId, icon: QrCode, label: t('qrcode'), detail: t('qrcodeDesc') },
-  { id: 'pdf' as ToolId, icon: FileText, label: t('pdf'), detail: t('pdfDesc') },
-])
 watch(() => route.path, (path) => {
   const tool = path.slice(1) as ToolId
+  if (store.running && path === '/' && lastToolPath.value) {
+    void router.replace(lastToolPath.value)
+    return
+  }
   if (!['convert', 'compress', 'watermark', 'qrcode', 'pdf'].includes(tool)) return
   if (store.running && tool !== store.activeTool) {
     const fallback = lastToolPath.value || `/${store.activeTool}`
@@ -51,10 +48,6 @@ onMounted(() => {
   void wailsService.checkForUpdate().then(info => { if (info.available) updateInfo.value = info }).catch(() => undefined)
 })
 onUnmounted(() => { stopUpdateAvailable(); stopUpdateProgress() })
-function navigate(id: ToolId) {
-  if (!store.setTool(id)) return
-  void router.push(`/${id}`)
-}
 function toggleTheme() { setThemeMode(dark.value ? 'light' : 'dark') }
 function toggleLocale() { locale.value = locale.value === 'en' ? 'zh' : 'en' }
 async function installUpdate() {
@@ -76,10 +69,9 @@ async function installUpdate() {
       <div class="brand"><span class="brand-mark">
           <Zap :size="16" />
         </span><span>{{ t('appName') }}</span></div>
-      <div class="sidebar-section-label">{{ t('nav') }}</div>
-      <nav class="tool-nav">
-        <ToolNav :items="tools" :active-path="route.path" @navigate="navigate" />
-      </nav>
+      <div v-if="route.path !== '/'" class="sidebar-home">
+        <HomeButton :disabled="store.running" />
+      </div>
       <div class="sidebar-bottom">
         <button class="tool-link" :class="{ active: route.path === '/recent' }" @click="router.push('/recent')">
           <Clock3 :size="18" /><span>{{ t('recent') }}</span>
@@ -113,7 +105,9 @@ v-if="updateInfo?.available" class="update-button"
           </button></div>
       </header>
       <nav class="mobile-tool-nav" :aria-label="t('nav')">
-        <ToolNav :items="tools" :active-path="route.path" mobile @navigate="navigate" />
+        <div v-if="route.path !== '/'" class="mobile-home">
+          <HomeButton :disabled="store.running" />
+        </div>
         <button class="mobile-tool-link" :class="{ active: route.path === '/recent' }" @click="router.push('/recent')">
           <Clock3 :size="16" /><span>{{ t('recent') }}</span>
         </button>

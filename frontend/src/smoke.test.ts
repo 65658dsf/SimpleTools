@@ -58,6 +58,13 @@ describe('frontend contract smoke tests', () => {
     }
   })
 
+  it('contains the home navigation label in both supported locales', () => {
+    const messages = i18n.global.messages.value
+    for (const locale of ['en', 'zh'] as const) {
+      expect((messages[locale] as Record<string, string>).backHome).toBeTruthy()
+    }
+  })
+
   it('contains every QR code label in both supported locales', () => {
     const messages = i18n.global.messages.value
     for (const locale of ['en', 'zh'] as const) {
